@@ -65,14 +65,22 @@ fi
 echo "::endgroup::"
 
 echo "::group::Actualizando repositorios de Helm"
-retry helm repo update
-echo "✓ Repositorios actualizados"
+# Verificar si hay repositorios configurados
+REPOS_COUNT=$(helm repo list 2>/dev/null | tail -n +2 | wc -l)
+
+if [ "$REPOS_COUNT" -gt 0 ]; then
+  retry helm repo update
+  echo "✓ Repositorios actualizados"
+else
+  echo "⚠ No hay repositorios de Helm configurados"
+  echo "  (Se configurarán cuando se instalen los charts)"
+fi
 echo "::endgroup::"
 
 echo "::group::Verificando estado de Helm"
 HELM_VERSION_OUTPUT=$(helm version --short)
 echo "Versión de Helm: $HELM_VERSION_OUTPUT"
-HELM_REPOS_COUNT=$(helm repo list | wc -l)
+HELM_REPOS_COUNT=$(helm repo list | tail -n +2 | wc -l)
 echo "Repositorios configurados: $HELM_REPOS_COUNT"
 echo "::endgroup::"
 
