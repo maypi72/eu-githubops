@@ -32,8 +32,11 @@ echo "::endgroup::"
 echo "::group::Comprobando si k3s ya está instalado"
 if command -v k3s >/dev/null 2>&1; then
   echo "k3s ya instalado: $(k3s --version)"
-else
   echo "::endgroup::"
+else
+  echo "k3s no instalado, procediendo..."
+  echo "::endgroup::"
+  
   echo "::group::Instalando k3s"
   curl -sfL "${K3S_INSTALL_SCRIPT_URL}" | \
     INSTALL_K3S_VERSION="${K3S_VERSION}" \
@@ -44,15 +47,41 @@ else
       --cluster-cidr=10.42.0.0/16 \
       --service-cidr=10.43.0.0/16" \
     sh -s -
+  echo "::endgroup::"
 fi
-echo "::endgroup::"
 
 echo "::group::Preparando kubeconfig para el runner"
 KUBECONFIG="${KUBECONFIG:-$HOME/kubeconfig}"
-sudo cp /etc/rancher/k3s/k3s.yaml "$KUBECONFIG"
-sudo chown $USER:$USER "$KUBECONFIG"
+
+# Comprobar que el archivo fuente existe
+if [ ! -f "/etc/rancher/k3s/k3s.yaml" ]; then
+  echo "ERROR: /etc/rancher/k3s/k3s.yaml no encontrado"
+  exit 1
+fi
+
+# Crear directorio si no existe
+mkdir -p "$(dirname "$KUBECONFIG")"
+
+# Copiar con manejo de errores
+if ! sudo cp /etc/rancher/k3s/k3s.yaml "$KUBECONFIG"; then
+  echo "ERROR: No se pudo copiar kubeconfig"
+  exit 1
+fi
+
+if ! sudo chown "$USER:$USER" "$KUBECONFIG"; then
+  echo "ERROR: No se pudo cambiar propietario del kubeconfig"
+  exit 1
+fi
+
+# Verificar que el archivo se copió correctamente
+if [ ! -f "$KUBECONFIG" ]; then
+  echo "ERROR: kubeconfig no existe después de copiar"
+  exit 1
+fi
+
 export KUBECONFIG
 echo "✓ KUBECONFIG preparado en $KUBECONFIG"
+echo "✓ Tamaño: $(du -h "$KUBECONFIG" | cut -f1)"
 echo "::endgroup::"
 
 echo "::group::Esperando a que el nodo esté Ready"

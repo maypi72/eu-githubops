@@ -46,17 +46,20 @@ run_bootstrap() {
   echo "::group::Ejecutando $script_name"
   echo "================================================"
   
-  if bash "$script_path"; then
+  # Asegurar que KUBECONFIG está disponible para el subproceso
+  env KUBECONFIG="$KUBECONFIG" bash "$script_path"
+  bootstrap_exit=$?
+  
+  if [ $bootstrap_exit -eq 0 ]; then
     echo "================================================"
     echo "✓ $script_name completado exitosamente"
     echo "::endgroup::"
     return 0
   else
-    local exit_code=$?
     echo "================================================"
-    echo "✗ ERROR: $script_name falló con código $exit_code"
+    echo "✗ ERROR: $script_name falló con código $bootstrap_exit"
     echo "::endgroup::"
-    return $exit_code
+    return $bootstrap_exit
   fi
 }
 
