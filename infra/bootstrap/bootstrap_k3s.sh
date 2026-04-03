@@ -66,7 +66,7 @@ else
     INSTALL_K3S_CHANNEL="${K3S_CHANNEL}" \
     INSTALL_K3S_EXEC="server \
       --disable traefik \
-      --no-flannel" \
+      --flannel-backend=none" \
     sh -s -; then
     echo "ERROR: Falló la ejecución del script de instalación de k3s"
     exit 1
