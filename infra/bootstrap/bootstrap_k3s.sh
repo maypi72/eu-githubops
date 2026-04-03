@@ -44,7 +44,7 @@ else
     INSTALL_K3S_CHANNEL="${K3S_CHANNEL}" \
     INSTALL_K3S_EXEC="server \
       --disable traefik \
-      --flannel-backend=none \
+      --no-flannel \
       --cluster-cidr=10.42.0.0/16 \
       --service-cidr=10.43.0.0/16" \
     sh -s -
@@ -93,7 +93,7 @@ echo "::endgroup::"
 echo "::group::Esperando a que los pods de K3s estén running"
 echo "Esperando a que todos los pods del sistema estén en estado Running o Succeeded..."
 
-TIMEOUT_SECONDS=600  # 10 minutos
+TIMEOUT_SECONDS=300  # 5 minutos
 ELAPSED=0
 CHECK_INTERVAL=5
 
