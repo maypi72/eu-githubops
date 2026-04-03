@@ -24,6 +24,26 @@ retry() {
 }
 
 echo "::group::Preparando sistema"
+echo "Verificando requisitos previos..."
+
+# Verificar puertos disponibles
+echo "Verificando puertos disponibles:"
+netstat -tuln 2>/dev/null | grep -E ":6443|:10250" || echo "⚠ Puerto 6443 (API) disponible" 
+
+# Verificar conectividad DNS
+echo ""
+echo "Verificando DNS:"
+if nslookup kubernetes.default.svc.cluster.local 8.8.8.8 >/dev/null 2>&1 || true; then
+  echo "✓ DNS funcional"
+fi
+
+# Limpiar instalación antigua si existe
+if [ -d "/var/lib/rancher/k3s" ]; then
+  echo "⚠ Directorio /var/lib/rancher/k3s ya existe"
+  echo "  Si hay problemas, considera: sudo rm -rf /var/lib/rancher/k3s"
+fi
+
+echo ""
 sudo apt-get update -y
 sudo apt-get install -y curl jq ca-certificates
 sudo swapoff -a || true
@@ -39,15 +59,36 @@ else
   echo "::endgroup::"
   
   echo "::group::Instalando k3s"
-  curl -sfL "${K3S_INSTALL_SCRIPT_URL}" | \
+  
+  # Ejecutar instalación de k3s
+  if ! curl -sfL "${K3S_INSTALL_SCRIPT_URL}" | \
     INSTALL_K3S_VERSION="${K3S_VERSION}" \
     INSTALL_K3S_CHANNEL="${K3S_CHANNEL}" \
     INSTALL_K3S_EXEC="server \
       --disable traefik \
-      --no-flannel \
-      --cluster-cidr=10.42.0.0/16 \
-      --service-cidr=10.43.0.0/16" \
-    sh -s -
+      --no-flannel" \
+    sh -s -; then
+    echo "ERROR: Falló la ejecución del script de instalación de k3s"
+    exit 1
+  fi
+  
+  # Esperar a que el servicio k3s esté listo
+  echo "Esperando a que k3s.service inicie..."
+  sleep 5
+  
+  # Verificar que el servicio está activo
+  if ! systemctl is-active --quiet k3s; then
+    echo "ERROR: k3s.service no está activo"
+    echo ""
+    echo "Estado del servicio k3s:"
+    systemctl status k3s || true
+    echo ""
+    echo "Últimos logs de k3s:"
+    journalctl -xeu k3s.service -n 50 || true
+    exit 1
+  fi
+  
+  echo "✓ k3s instalado y servicio activo"
   echo "::endgroup::"
 fi
 
@@ -57,6 +98,18 @@ KUBECONFIG="${KUBECONFIG:-$HOME/kubeconfig}"
 # Comprobar que el archivo fuente existe
 if [ ! -f "/etc/rancher/k3s/k3s.yaml" ]; then
   echo "ERROR: /etc/rancher/k3s/k3s.yaml no encontrado"
+  echo ""
+  echo "Diagnosis:"
+  echo "1. Verificar que k3s está activo:"
+  systemctl status k3s || true
+  echo ""
+  echo "2. Verificar logs de k3s:"
+  journalctl -xeu k3s.service -n 30 || true
+  echo ""
+  echo "3. Verificar que el servicio está corriendo:"
+  ps aux | grep -i k3s | grep -v grep || echo "No k3s process found"
+  echo ""
+  echo "Para reinstalar, ejecuta: sudo /usr/local/bin/k3s-uninstall.sh && rm -rf /etc/rancher"
   exit 1
 fi
 
@@ -64,13 +117,14 @@ fi
 mkdir -p "$(dirname "$KUBECONFIG")"
 
 # Copiar con manejo de errores
-if ! sudo cp /etc/rancher/k3s/k3s.yaml "$KUBECONFIG"; then
+if ! cp /etc/rancher/k3s/k3s.yaml "$KUBECONFIG"; then
   echo "ERROR: No se pudo copiar kubeconfig"
   exit 1
 fi
 
-if ! sudo chown "$USER:$USER" "$KUBECONFIG"; then
-  echo "ERROR: No se pudo cambiar propietario del kubeconfig"
+# Cambiar permisos (no se necesita sudo con 644 en instalación actual)
+if ! chmod 600 "$KUBECONFIG"; then
+  echo "ERROR: No se pudo cambiar permisos del kubeconfig"
   exit 1
 fi
 
