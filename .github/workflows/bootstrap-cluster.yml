@@ -1,0 +1,249 @@
+name: Bootstrap Cluster
+
+on:
+  workflow_dispatch:
+    inputs:
+      k3s_version:
+        description: 'Versión de k3s'
+        required: false
+        default: 'v1.30.0+k3s1'
+        type: string
+      helm_repos:
+        description: 'Repositorios de Helm a instalar (separados por comas)'
+        required: false
+        default: 'bitnami,jetstack,prometheus-community'
+        type: string
+      dry_run:
+        description: 'Ejecutar en modo dry-run (sin cambios)'
+        required: false
+        default: false
+        type: boolean
+
+env:
+  KUBECONFIG: ${{ runner.temp }}/kubeconfig
+  RETRY_MAX: 5
+  RETRY_DELAY: 2
+
+jobs:
+  bootstrap:
+    name: Bootstrap Cluster
+    runs-on: [self-hosted, linux]
+    timeout-minutes: 60
+    
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Validate Workspace
+        run: |
+          echo "::group::Validación del workspace"
+          echo "Verificando estructura del proyecto..."
+          
+          required_files=(
+            "infra/bootstrap/bootstrap_k3s.sh"
+            "infra/bootstrap/bootstrap_helm.sh"
+            "infra/bootstrap/bootstrap_ingress.sh"
+            "infra/bootstrap/bootstrap_all.sh"
+          )
+          
+          for file in "${required_files[@]}"; do
+            if [ -f "$file" ]; then
+              echo "✓ $file encontrado"
+            else
+              echo "✗ ERROR: $file no encontrado"
+              exit 1
+            fi
+          done
+          
+          echo "✓ Todos los scripts de bootstrap están presentes"
+          echo "::endgroup::"
+
+      - name: System Information
+        run: |
+          echo "::group::Información del sistema"
+          echo "OS: $(uname -s)"
+          echo "Kernel: $(uname -r)"
+          echo "Arquitectura: $(uname -m)"
+          echo "Memoria: $(free -h | grep Mem)"
+          echo "Disco: $(df -h / | tail -1)"
+          echo "::endgroup::"
+
+      - name: Check Prerequisites
+        run: |
+          echo "::group::Verificación de herramientas"
+          
+          tools=("docker" "curl" "jq")
+          for tool in "${tools[@]}"; do
+            if command -v "$tool" >/dev/null 2>&1; then
+              version=$($tool --version 2>&1 | head -1)
+              echo "✓ $tool: $version"
+            else
+              echo "⚠ $tool no está instalado (podría ser necesario)"
+            fi
+          done
+          
+          echo "::endgroup::"
+
+      - name: Setup Bootstrap Environment
+        run: |
+          echo "::group::Configuración del entorno"
+          
+          export K3S_VERSION="${{ inputs.k3s_version }}"
+          echo "K3S_VERSION=$K3S_VERSION" >> $GITHUB_ENV
+          
+          echo "✓ KUBECONFIG configurado en: $KUBECONFIG"
+          echo "✓ Retry máximo: $RETRY_MAX"
+          echo "✓ Delay de retry: $RETRY_DELAY segundos"
+          
+          echo "::endgroup::"
+
+      - name: Execute Bootstrap
+        id: bootstrap
+        run: |
+          echo "::group::Ejecutando Bootstrap"
+          
+          if [ "${{ inputs.dry_run }}" == "true" ]; then
+            echo "⚠ MODO DRY-RUN: Scripts no serán ejecutados"
+            echo "DRY_RUN=true" >> $GITHUB_ENV
+          else
+            echo "Iniciando bootstrap del cluster..."
+            bash infra/bootstrap/bootstrap_all.sh
+            bootstrap_exit=$?
+            
+            if [ $bootstrap_exit -eq 0 ]; then
+              echo "✓ Bootstrap completado exitosamente"
+            else
+              echo "✗ Bootstrap falló con código $bootstrap_exit"
+              exit $bootstrap_exit
+            fi
+          fi
+          
+          echo "::endgroup::"
+
+      - name: Verify Bootstrap Installation
+        if: success() && env.DRY_RUN != 'true'
+        run: |
+          echo "::group::Verificación de instalaciones"
+          
+          # Verificar k3s
+          if command -v k3s >/dev/null 2>&1; then
+            k3s --version
+          fi
+          
+          # Verificar kubectl
+          if command -v kubectl >/dev/null 2>&1; then
+            echo "kubectl version:"
+            kubectl version --client --short || true
+            
+            echo ""
+            echo "Nodos del cluster:"
+            kubectl get nodes || true
+          fi
+          
+          # Verificar Helm
+          if command -v helm >/dev/null 2>&1; then
+            echo "Helm version:"
+            helm version --short || true
+            
+            echo ""
+            echo "Releases instalados:"
+            helm list --all-namespaces || true
+          fi
+          
+          echo "::endgroup::"
+
+      - name: Prepare kubeconfig for Artifact
+        if: success()
+        run: |
+          echo "::group::Preparando kubeconfig"
+          
+          if [ -f "$KUBECONFIG" ]; then
+            # Crear directorio temporal para artefactos
+            mkdir -p "${{ runner.temp }}/artifact"
+            
+            # Copiar kubeconfig
+            cp "$KUBECONFIG" "${{ runner.temp }}/artifact/kubeconfig"
+            
+            # Sanitizar información sensible para el log
+            echo "✓ kubeconfig preparado para artifact"
+            echo "Tamaño: $(du -h "${{ runner.temp }}/artifact/kubeconfig" | cut -f1)"
+          else
+            echo "⚠ KUBECONFIG no encontrado en: $KUBECONFIG"
+            exit 1
+          fi
+          
+          echo "::endgroup::"
+
+      - name: Upload kubeconfig Artifact
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: kubeconfig
+          path: ${{ runner.temp }}/artifact/kubeconfig
+          retention-days: 7
+          if-no-files-found: error
+          compression-level: 9
+
+      - name: Create Bootstrap Report
+        if: always()
+        run: |
+          echo "::group::Reporte del Bootstrap"
+          
+          report_file="${{ runner.temp }}/artifact/bootstrap-report.txt"
+          mkdir -p "$(dirname "$report_file")"
+          
+          {
+            echo "Bootstrap Report"
+            echo "================"
+            echo "Timestamp: $(date -u '+%Y-%m-%d %H:%M:%S Z')"
+            echo "Workflow: ${{ github.workflow }}"
+            echo "Run ID: ${{ github.run_id }}"
+            echo "Run Number: ${{ github.run_number }}"
+            echo "Actor: ${{ github.actor }}"
+            echo ""
+            echo "Inputs:"
+            echo "  K3S Version: ${{ inputs.k3s_version }}"
+            echo "  Dry-run: ${{ inputs.dry_run }}"
+            echo ""
+            echo "System:"
+            echo "  OS: $(uname -s)"
+            echo "  Kernel: $(uname -r)"
+            echo ""
+            echo "Status: $([ "${{ job.status }}" == 'success' ] && echo '✓ SUCCESS' || echo '✗ FAILED')"
+          } > "$report_file"
+          
+          cat "$report_file"
+          echo "::endgroup::"
+
+      - name: Upload Bootstrap Report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: bootstrap-report
+          path: ${{ runner.temp }}/artifact/bootstrap-report.txt
+          retention-days: 30
+          compression-level: 9
+
+      - name: Cleanup on Failure
+        if: failure()
+        run: |
+          echo "::group::Limpieza tras fallo"
+          echo "⚠ Bootstrap falló. Manteniendo kubeconfig para debugging."
+          echo "✓ Revisa los logs anteriores para detalles del error"
+          echo "::endgroup::"
+
+      - name: Success Summary
+        if: success()
+        run: |
+          echo "::group::Resumen de éxito"
+          echo ""
+          echo "✓ Bootstrap completado exitosamente"
+          echo "✓ kubeconfig disponible en artifacts"
+          echo "✓ Puede ser descargado para interactuar con el cluster"
+          echo ""
+          echo "Próximos pasos:"
+          echo "1. Descargue el kubeconfig de los artifacts"
+          echo "2. Exporte: export KUBECONFIG=<ruta-a-kubeconfig>"
+          echo "3. Verifique: kubectl get nodes"
+          echo ""
+          echo "::endgroup::"
