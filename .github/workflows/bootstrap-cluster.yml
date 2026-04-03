@@ -6,7 +6,7 @@ on:
       k3s_version:
         description: 'Versión de k3s'
         required: false
-        default: 'v1.30.0+k3s1'
+        default: 'v1.34.4+k3s1'
         type: string
       dry_run:
         description: 'Ejecutar en modo dry-run (sin cambios)'

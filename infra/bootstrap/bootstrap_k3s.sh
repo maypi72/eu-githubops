@@ -2,10 +2,11 @@
 set -euo pipefail
 IFS=$'\n\t'
 
-K3S_VERSION="${K3S_VERSION:-v1.30.0+k3s1}"
+K3S_VERSION="${K3S_VERSION:-v1.34.4+k3s1}"
 K3S_CHANNEL="${K3S_CHANNEL:-stable}"
 K3S_INSTALL_SCRIPT_URL="https://get.k3s.io"
-CALICO_MANIFEST_URL="https://raw.githubusercontent.com/projectcalico/calico/v3.27.0/manifests/calico.yaml"
+CALICO_VERSION="${CALICO_VERSION:-v3.27.2}"
+CALICO_MANIFEST_URL="https://raw.githubusercontent.com/projectcalico/calico/v${CALICO_VERSION}/manifests/calico.yaml"
 
 retry() {
   local -r max=${RETRY_MAX:-5}
@@ -92,7 +93,7 @@ echo "::endgroup::"
 echo "::group::Esperando a que los pods de K3s estén running"
 echo "Esperando a que todos los pods del sistema estén en estado Running o Succeeded..."
 
-TIMEOUT_SECONDS=300  # 5 minutos
+TIMEOUT_SECONDS=600  # 10 minutos
 ELAPSED=0
 CHECK_INTERVAL=5
 
