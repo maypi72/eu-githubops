@@ -89,6 +89,44 @@ retry kubectl get nodes
 retry kubectl wait --for=condition=Ready node --all --timeout=300s
 echo "::endgroup::"
 
+echo "::group::Esperando a que los pods de K3s estén running"
+echo "Esperando a que todos los pods del sistema estén en estado Running o Succeeded..."
+
+TIMEOUT_SECONDS=300  # 5 minutos
+ELAPSED=0
+CHECK_INTERVAL=5
+
+while [ $ELAPSED -lt $TIMEOUT_SECONDS ]; do
+  # Contar pods en estado Running o Succeeded en kube-system
+  RUNNING_PODS=$(kubectl get pods -n kube-system --field-selector=status.phase=Running --no-headers 2>/dev/null | wc -l)
+  SUCCEEDED_PODS=$(kubectl get pods -n kube-system --field-selector=status.phase=Succeeded --no-headers 2>/dev/null | wc -l)
+  
+  # Contar pods NO en estado Running o Succeeded (Pending, Failed, CrashLoopBackOff, etc.)
+  NOT_READY=$(kubectl get pods -n kube-system --field-selector=status.phase!=Running,status.phase!=Succeeded --no-headers 2>/dev/null | wc -l)
+  
+  TOTAL=$((RUNNING_PODS + SUCCEEDED_PODS + NOT_READY))
+  
+  echo "✓ Pods en kube-system: Running=$RUNNING_PODS | Succeeded=$SUCCEEDED_PODS | Otros=$NOT_READY | Total=$TOTAL | Tiempo: ${ELAPSED}s"
+  
+  # Si todos los pods estén listos, salir
+  if [ $NOT_READY -eq 0 ] && [ $TOTAL -gt 0 ]; then
+    echo "✓ ¡Todos los pods de K3s estén Running o Succeeded!"
+    echo "::endgroup::"
+    break
+  fi
+  
+  sleep $CHECK_INTERVAL
+  ELAPSED=$((ELAPSED + CHECK_INTERVAL))
+done
+
+if [ $NOT_READY -gt 0 ]; then
+  echo "⚠ Algunos pods aún no estén Ready, continuando con cautela..."
+  echo ""
+  echo "Pods no listos en kube-system:"
+  kubectl get pods -n kube-system --field-selector=status.phase!=Running,status.phase!=Succeeded || true
+fi
+echo "::endgroup::"
+
 echo "::group::Instalando Calico"
 if ! kubectl get ns calico-system >/dev/null 2>&1; then
   retry kubectl apply -f "${CALICO_MANIFEST_URL}"

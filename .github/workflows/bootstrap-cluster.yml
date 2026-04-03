@@ -25,14 +25,12 @@ env:
   RETRY_MAX: 5
   RETRY_DELAY: 2
   ARTIFACT_DIR: $HOME/bootstrap-artifacts
-  POD_WAIT_TIMEOUT: 15m     # Timeout máximo para que todos los pods estén running
-  INGRESS_WAIT_TIMEOUT: 10m # Timeout máximo para que el ingress esté running
 
 jobs:
   bootstrap:
     name: Bootstrap Cluster
     runs-on: [self-hosted, linux]
-    timeout-minutes: 60  # Aumentado a 60 minutos para soportar bootstrap + esperas de pods (15m + 10m)
+    timeout-minutes: 30  # Bootstrap de K3s, Helm e Ingress
     environment: lab  # Requiere aprobación/protecciones configuradas en GitHub
     
     steps:
@@ -167,77 +165,6 @@ jobs:
           
           echo "::endgroup::"
 
-      - name: Wait for All Pods to be Running
-        if: success() && env.DRY_RUN != 'true'
-        run: |
-          echo "::group::Esperando a que todos los pods estén running (máximo $POD_WAIT_TIMEOUT)"
-          
-          TIMEOUT_SECONDS=$((15 * 60))  # 15 minutos
-          ELAPSED=0
-          CHECK_INTERVAL=10
-          
-          while [ $ELAPSED -lt $TIMEOUT_SECONDS ]; do
-            # Contar pods en estado Running
-            RUNNING_PODS=$(kubectl get pods --all-namespaces --field-selector=status.phase=Running --no-headers 2>/dev/null | wc -l)
-            
-            # Contar pods NO en estado Running (excluyendo Succeeded)
-            NOT_RUNNING=$(kubectl get pods --all-namespaces --field-selector=status.phase!=Running,status.phase!=Succeeded --no-headers 2>/dev/null | wc -l)
-            
-            echo "✓ Pods Running: $RUNNING_PODS | Pods en otros estados: $NOT_RUNNING | Tiempo: ${ELAPSED}s"
-            
-            if [ $NOT_RUNNING -eq 0 ]; then
-              echo "✓ ¡Todos los pods están en estado Running o Succeeded!"
-              echo "::endgroup::"
-              exit 0
-            fi
-            
-            sleep $CHECK_INTERVAL
-            ELAPSED=$((ELAPSED + CHECK_INTERVAL))
-          done
-          
-          echo "✗ TIMEOUT: No todos los pods llegaron a estado Running después de $POD_WAIT_TIMEOUT"
-          echo ""
-          echo "Pods aún pendientes:"
-          kubectl get pods --all-namespaces --field-selector=status.phase!=Running,status.phase!=Succeeded || true
-          
-          echo "::endgroup::"
-          exit 1
-
-      - name: Wait for Ingress Controller to be Running
-        if: success() && env.DRY_RUN != 'true'
-        run: |
-          echo "::group::Esperando al Ingress Controller (máximo $INGRESS_WAIT_TIMEOUT)"
-          
-          TIMEOUT_SECONDS=$((10 * 60))  # 10 minutos
-          ELAPSED=0
-          CHECK_INTERVAL=5
-          
-          while [ $ELAPSED -lt $TIMEOUT_SECONDS ]; do
-            # Verificar que el pod del ingress-nginx-controller está Running
-            INGRESS_STATUS=$(kubectl get pods -n ingress-nginx -l app.kubernetes.io/name=ingress-nginx,app.kubernetes.io/component=controller \
-              --field-selector=status.phase=Running --no-headers 2>/dev/null | wc -l)
-            
-            echo "✓ Ingress Controller Pods Running: $INGRESS_STATUS | Tiempo: ${ELAPSED}s"
-            
-            if [ $INGRESS_STATUS -gt 0 ]; then
-              echo "✓ ¡Ingress Controller está listo!"
-              kubectl get pods -n ingress-nginx -l app.kubernetes.io/name=ingress-nginx,app.kubernetes.io/component=controller || true
-              echo "::endgroup::"
-              exit 0
-            fi
-            
-            sleep $CHECK_INTERVAL
-            ELAPSED=$((ELAPSED + CHECK_INTERVAL))
-          done
-          
-          echo "✗ TIMEOUT: Ingress Controller no llegó a estado Running después de $INGRESS_WAIT_TIMEOUT"
-          echo ""
-          echo "Estado del Ingress:"
-          kubectl get pods -n ingress-nginx || true
-          
-          echo "::endgroup::"
-          exit 1
-
       - name: Secure kubeconfig from k3s
         if: success() && env.DRY_RUN != 'true'
         run: |
@@ -364,6 +291,10 @@ jobs:
   #    - Environment secrets: credenciales únicas para este environment
   #
   # Con esto, el workflow esperará aprobación antes de ejecutar el job "bootstrap"
+  #
+  # NOTA: Los chequeos de pods se hacen directamente en los scripts:
+  # - bootstrap_k3s.sh: Espera a que los pods de K3s estén running (5 minutos max)
+  # - bootstrap_ingress.sh: Verifica que el deployment del ingress existe (300 segundos max)
 
       - name: Success Summary
         if: success()
