@@ -40,6 +40,60 @@ infra/
 
 ---
 
+## Configuración de K3s
+
+### Opciones de Instalación
+
+K3s se instala con las siguientes opciones deshabilitando componentes innecesarios y configurando Calico como CNI:
+
+```bash
+K3S_EXEC_OPTS="--disable traefik --disable servicelb --flannel-backend=none --disable-network-policy --write-kubeconfig-mode 644"
+```
+
+#### Significado de cada opción:
+
+| Opción | Descripción |
+|--------|-------------|
+| `--disable traefik` | No instala Traefik (Ingress Controller integrado). Usamos NGINX via Helm |
+| `--disable servicelb` | No instala klipper-lb (LoadBalancer simple). Mejor control con Calico |
+| `--flannel-backend=none` | Desactiva Flannel CNI para usar Calico en su lugar |
+| `--disable-network-policy` | Sin política de red integrada. Calico proporciona versión más robusta |
+| `--write-kubeconfig-mode 644` | Genera kubeconfig con permisos 644 (legible sin `sudo`) |
+
+### Flujo de Instalación
+
+1. **K3s Core**: Instala K3s sin CNI
+2. **Calico**: Se instala después como CNI con manifests oficial
+3. **Helm**: Se instala para gestionar otros componentes
+4. **NGINX Ingress**: Se despliega via Helm usando `infra/values/ingress_values.yaml`
+
+### Verificación post-instalación
+
+El script `bootstrap_k3s.sh` verifica:
+- ✅ Puertos disponibles (6443, 10250)
+- ✅ Conectividad DNS
+- ✅ Servicio k3s activo
+- ✅ Pods del sistema en estado Running (máximo 5 minutos)
+- ✅ Kubeconfig accesible y con permisos correctos
+
+### Troubleshooting
+
+Si K3s falla al iniciar:
+
+```bash
+# Ver estado del servicio
+sudo systemctl status k3s
+
+# Ver logs detallados
+sudo journalctl -xeu k3s.service -n 50
+
+# Desinstalar completamente
+sudo /usr/local/bin/k3s-uninstall.sh
+sudo rm -rf /etc/rancher /var/lib/rancher
+```
+
+---
+
 ## Seguridad del Workflow Bootstrap
 
 Esta sección describe las medidas de seguridad implementadas en el workflow `bootstrap-cluster.yml`.
