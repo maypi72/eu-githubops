@@ -36,6 +36,7 @@ jobs:
     name: Bootstrap Cluster
     runs-on: [self-hosted, linux]
     timeout-minutes: 20
+    environment: lab  # Requiere aprobación/protecciones configuradas en GitHub
     
     steps:
       - name: Checkout Repository
@@ -169,23 +170,60 @@ jobs:
           
           echo "::endgroup::"
 
+      - name: Secure kubeconfig from k3s
+        if: success() && env.DRY_RUN != 'true'
+        run: |
+          echo "::group::Asegurando kubeconfig de k3s"
+          
+          K3S_KUBECONFIG="/etc/rancher/k3s/k3s.yaml"
+          
+          if [ -f "$K3S_KUBECONFIG" ]; then
+            # Copiar kubeconfig sin permisos elevados
+            sudo cp "$K3S_KUBECONFIG" "$KUBECONFIG"
+            
+            # Cambiar propietario para evitar usar sudo en pasos posteriores
+            sudo chown $(id -u):$(id -g) "$KUBECONFIG"
+            
+            # Establecer permisos restrictivos (solo lectura para el owner)
+            chmod 600 "$KUBECONFIG"
+            
+            echo "✓ kubeconfig copiado desde $K3S_KUBECONFIG"
+            echo "✓ Propietario cambiado a $(whoami)"
+            echo "✓ Permisos establecidos a 600 (solo lectura para owner)"
+          else
+            echo "⚠ k3s kubeconfig no encontrado en: $K3S_KUBECONFIG"
+            echo "El workflow continuará esperando que esté disponible en: $KUBECONFIG"
+          fi
+          
+          echo "::endgroup::"
+
       - name: Prepare kubeconfig for Artifact
         if: success()
         run: |
-          echo "::group::Preparando kubeconfig"
+          echo "::group::Preparando kubeconfig para artifact"
           
           if [ -f "$KUBECONFIG" ]; then
             # Crear directorio temporal para artefactos
             mkdir -p "$ARTIFACT_DIR"
             
-            # Copiar kubeconfig
+            # Copiar kubeconfig con permisos restrictivos
             cp "$KUBECONFIG" "$ARTIFACT_DIR/kubeconfig"
+            chmod 600 "$ARTIFACT_DIR/kubeconfig"
             
-            # Sanitizar información sensible para el log
-            echo "✓ kubeconfig preparado para artifact"
-            echo "Tamaño: $(du -h "$ARTIFACT_DIR/kubeconfig" | cut -f1)"
+            # Verificar que el archivo se copió correctamente
+            if [ -f "$ARTIFACT_DIR/kubeconfig" ]; then
+              echo "✓ kubeconfig preparado para artifact"
+              echo "Tamaño: $(du -h "$ARTIFACT_DIR/kubeconfig" | cut -f1)"
+              echo "Permisos: $(stat -c '%a' "$ARTIFACT_DIR/kubeconfig")"
+              echo ""
+              echo "⚠ IMPORTANTE: Revisa la retención de artifacts (actualmente 30 días)"
+              echo "⚠ El kubeconfig contiene credenciales - mantén el acceso restringido"
+            else
+              echo "✗ ERROR: No se pudo copiar kubeconfig"
+              exit 1
+            fi
           else
-            echo "⚠ KUBECONFIG no encontrado en: $KUBECONFIG"
+            echo "✗ ERROR: KUBECONFIG no encontrado en: $KUBECONFIG"
             exit 1
           fi
           
@@ -197,7 +235,7 @@ jobs:
         with:
           name: kubeconfig
           path: ${{ env.ARTIFACT_DIR }}/kubeconfig
-          retention-days: 7
+          retention-days: 30
           if-no-files-found: error
           compression-level: 9
 
@@ -248,6 +286,16 @@ jobs:
           echo "⚠ Bootstrap falló. Manteniendo kubeconfig para debugging."
           echo "✓ Revisa los logs anteriores para detalles del error"
           echo "::endgroup::"
+
+  # NOTA: Para implementar protecciones adicionales en el job "bootstrap":
+  # 1. Ve a Settings → Environments → New environment → "lab"
+  # 2. Configura:
+  #    - Required reviewers: usuarios que deben aprobar antes de ejecutar
+  #    - Wait timer: minutos de espera antes de permitir ejecución
+  #    - Deployment branches: restringe a ramas específicas (ej: main, develop)
+  #    - Environment secrets: credenciales únicas para este environment
+  #
+  # Con esto, el workflow esperará aprobación antes de ejecutar el job "bootstrap"
 
       - name: Success Summary
         if: success()
