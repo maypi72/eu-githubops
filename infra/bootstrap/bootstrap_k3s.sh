@@ -116,13 +116,14 @@ fi
 # Crear directorio si no existe
 mkdir -p "$(dirname "$KUBECONFIG")"
 
-# Copiar con manejo de errores
-if ! cp /etc/rancher/k3s/k3s.yaml "$KUBECONFIG"; then
-  echo "ERROR: No se pudo copiar kubeconfig"
+# Copiar kubeconfig con sudo (requiere permisos)
+echo "Copiando kubeconfig desde /etc/rancher/k3s/k3s.yaml..."
+if ! sudo cat /etc/rancher/k3s/k3s.yaml > "$KUBECONFIG"; then
+  echo "ERROR: No se pudo copiar kubeconfig (permiso denegado)"
   exit 1
 fi
 
-# Cambiar permisos (no se necesita sudo con 644 en instalación actual)
+# Cambiar permisos para que solo el owner pueda leer/escribir
 if ! chmod 600 "$KUBECONFIG"; then
   echo "ERROR: No se pudo cambiar permisos del kubeconfig"
   exit 1
