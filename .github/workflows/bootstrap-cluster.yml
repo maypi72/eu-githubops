@@ -26,9 +26,10 @@ permissions:
 
 
 env:
-  KUBECONFIG: ${{ runner.temp }}/kubeconfig
+  KUBECONFIG: $HOME/.kube/config
   RETRY_MAX: 5
   RETRY_DELAY: 2
+  ARTIFACT_DIR: $HOME/bootstrap-artifacts
 
 jobs:
   bootstrap:
@@ -94,7 +95,7 @@ jobs:
         run: |
           echo "::group::Configuración del entorno"
           
-          export K3S_VERSION="${{ inputs.k3s_version }}"
+          export K3S_VERSION=${{ inputs.k3s_version }}
           echo "K3S_VERSION=$K3S_VERSION" >> $GITHUB_ENV
           
           echo "✓ KUBECONFIG configurado en: $KUBECONFIG"
@@ -165,14 +166,14 @@ jobs:
           
           if [ -f "$KUBECONFIG" ]; then
             # Crear directorio temporal para artefactos
-            mkdir -p "${{ runner.temp }}/artifact"
+            mkdir -p "$ARTIFACT_DIR"
             
             # Copiar kubeconfig
-            cp "$KUBECONFIG" "${{ runner.temp }}/artifact/kubeconfig"
+            cp "$KUBECONFIG" "$ARTIFACT_DIR/kubeconfig"
             
             # Sanitizar información sensible para el log
             echo "✓ kubeconfig preparado para artifact"
-            echo "Tamaño: $(du -h "${{ runner.temp }}/artifact/kubeconfig" | cut -f1)"
+            echo "Tamaño: $(du -h "$ARTIFACT_DIR/kubeconfig" | cut -f1)"
           else
             echo "⚠ KUBECONFIG no encontrado en: $KUBECONFIG"
             exit 1
@@ -185,7 +186,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: kubeconfig
-          path: ${{ runner.temp }}/artifact/kubeconfig
+          path: ${{ env.ARTIFACT_DIR }}/kubeconfig
           retention-days: 7
           if-no-files-found: error
           compression-level: 9
@@ -195,7 +196,7 @@ jobs:
         run: |
           echo "::group::Reporte del Bootstrap"
           
-          report_file="${{ runner.temp }}/artifact/bootstrap-report.txt"
+          report_file="$ARTIFACT_DIR/bootstrap-report.txt"
           mkdir -p "$(dirname "$report_file")"
           
           {
@@ -226,7 +227,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: bootstrap-report
-          path: ${{ runner.temp }}/artifact/bootstrap-report.txt
+          path: ${{ env.ARTIFACT_DIR }}/bootstrap-report.txt
           retention-days: 30
           compression-level: 9
 
