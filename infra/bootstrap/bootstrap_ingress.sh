@@ -8,6 +8,10 @@ INGRESS_RELEASE="ingress-nginx"
 INGRESS_CHART="ingress-nginx/ingress-nginx"
 INGRESS_REPO="https://kubernetes.github.io/ingress-nginx"
 
+# Get the script directory and construct the values file path
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+INGRESS_VALUES="${SCRIPT_DIR}/../values/ingress_values.yaml"
+
 retry() {
   local -r max=${RETRY_MAX:-5}
   local -r delay=${RETRY_DELAY:-2}
@@ -34,6 +38,14 @@ fi
 echo "✓ Usando KUBECONFIG: $KUBECONFIG"
 echo "::endgroup::"
 
+echo "::group::Comprobando fichero de values"
+if [ ! -f "$INGRESS_VALUES" ]; then
+  echo "ERROR: Fichero de values no existe en: $INGRESS_VALUES"
+  exit 1
+fi
+echo "✓ Fichero de values encontrado: $INGRESS_VALUES"
+echo "::endgroup::"
+
 echo "::group::Añadiendo repositorio Helm"
 retry helm repo add ingress-nginx "$INGRESS_REPO"
 retry helm repo update
@@ -50,8 +62,7 @@ retry helm upgrade --install "$INGRESS_RELEASE" "$INGRESS_CHART" \
   --namespace "$INGRESS_NAMESPACE" \
   --create-namespace \
   --atomic --wait --timeout 10m \
-  --set controller.watchIngressWithoutClass=true \
-  --set controller.ingressClassResource.default=true
+  -f "$INGRESS_VALUES"
 
 echo "::endgroup::"
 
