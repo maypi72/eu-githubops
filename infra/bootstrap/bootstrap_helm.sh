@@ -28,8 +28,11 @@ retry() {
 
 echo "::group::Comprobando recursos necesarios"
 # Comprobar KUBECONFIG
-if [ -z "${KUBECONFIG:-}" ] || [ ! -f "$KUBECONFIG" ]; then
-  echo "ERROR: KUBECONFIG no está definido o no existe"
+KUBECONFIG="${KUBECONFIG:-$HOME/kubeconfig}"
+export KUBECONFIG
+
+if [ ! -f "$KUBECONFIG" ]; then
+  echo "ERROR: KUBECONFIG no existe en: $KUBECONFIG"
   exit 1
 fi
 echo "✓ KUBECONFIG disponible: $KUBECONFIG"

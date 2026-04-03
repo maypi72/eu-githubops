@@ -48,10 +48,11 @@ fi
 echo "::endgroup::"
 
 echo "::group::Preparando kubeconfig para el runner"
-sudo cp /etc/rancher/k3s/k3s.yaml "$HOME/kubeconfig"
-sudo chown $USER:$USER "$HOME/kubeconfig"
-export KUBECONFIG="$HOME/kubeconfig"
-echo "KUBECONFIG preparado en $HOME/kubeconfig"
+KUBECONFIG="${KUBECONFIG:-$HOME/kubeconfig}"
+sudo cp /etc/rancher/k3s/k3s.yaml "$KUBECONFIG"
+sudo chown $USER:$USER "$KUBECONFIG"
+export KUBECONFIG
+echo "✓ KUBECONFIG preparado en $KUBECONFIG"
 echo "::endgroup::"
 
 echo "::group::Esperando a que el nodo esté Ready"

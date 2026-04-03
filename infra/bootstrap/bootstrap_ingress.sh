@@ -24,11 +24,14 @@ retry() {
 }
 
 echo "::group::Comprobando KUBECONFIG"
+KUBECONFIG="${KUBECONFIG:-$HOME/kubeconfig}"
+export KUBECONFIG
+
 if [ ! -f "$KUBECONFIG" ]; then
-  echo "ERROR: KUBECONFIG no está definido o no existe"
+  echo "ERROR: KUBECONFIG no existe en: $KUBECONFIG"
   exit 1
 fi
-echo "Usando KUBECONFIG: $KUBECONFIG"
+echo "✓ Usando KUBECONFIG: $KUBECONFIG"
 echo "::endgroup::"
 
 echo "::group::Añadiendo repositorio Helm"
