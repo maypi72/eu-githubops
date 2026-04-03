@@ -8,11 +8,6 @@ on:
         required: false
         default: 'v1.30.0+k3s1'
         type: string
-      helm_repos:
-        description: 'Repositorios de Helm a instalar (separados por comas)'
-        required: false
-        default: 'bitnami,jetstack,prometheus-community'
-        type: string
       dry_run:
         description: 'Ejecutar en modo dry-run (sin cambios)'
         required: false
