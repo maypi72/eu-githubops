@@ -19,6 +19,12 @@ on:
         default: false
         type: boolean
 
+permissions:
+  contents: read
+  id-token: write
+  actions: write  
+
+
 env:
   KUBECONFIG: ${{ runner.temp }}/kubeconfig
   RETRY_MAX: 5
@@ -28,7 +34,7 @@ jobs:
   bootstrap:
     name: Bootstrap Cluster
     runs-on: [self-hosted, linux]
-    timeout-minutes: 60
+    timeout-minutes: 20
     
     steps:
       - name: Checkout Repository
