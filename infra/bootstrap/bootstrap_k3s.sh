@@ -163,6 +163,10 @@ wait_for_node_ready() {
 
 install_dependencies
 install_k3s
+
+# Usar el kubeconfig de K3s para todas las llamadas a kubectl del bootstrap
+export KUBECONFIG=/etc/rancher/k3s/k3s.yaml
+
 wait_for_openapi_ready
 install_calico
 wait_for_calico_ready
