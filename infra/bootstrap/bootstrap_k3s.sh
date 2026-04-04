@@ -33,19 +33,24 @@ retry() {
 }
 
 install_calico() {
+  echo "📦 Esperando a que el API server esté disponible..."
+  retry kubectl cluster-info
+  
   echo "📦 Instalando CRDs de Calico..."
-  retry kubectl apply -f "${CALICO_CRDS_URL}"
+  retry kubectl apply -f "${CALICO_CRDS_URL}" --validate=false
 
   echo "📦 Instalando Tigera Operator..."
-  retry kubectl apply -f "${CALICO_OPERATOR_URL}"
+  retry kubectl apply -f "${CALICO_OPERATOR_URL}" --validate=false
 
   echo "📦 Esperando a que el Operator esté listo..."
+  sleep 10
   retry kubectl wait --for=condition=Ready pod -l k8s-app=tigera-operator -n tigera-operator --timeout=300s
 
   echo "📦 Aplicando Custom Resources de Calico..."
-  retry kubectl apply -f "${CALICO_CUSTOM_RESOURCES_URL}"
+  retry kubectl apply -f "${CALICO_CUSTOM_RESOURCES_URL}" --validate=false
 
   echo "📦 Esperando a que Calico esté completamente listo..."
+  sleep 10
   retry kubectl wait --for=condition=DaemonSetReady tigerastatus/calico -n calico-system --timeout=300s
   
   echo "✓ Calico instalado correctamente"
