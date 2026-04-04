@@ -76,7 +76,6 @@ echo "::group::Comprobando si Helm ya está instalado"
 if command -v helm >/dev/null 2>&1; then
   HELM_INSTALLED_VERSION=$(helm version -c 2>/dev/null | grep '^version' | awk '{print $2}' || echo 'versión desconocida')
   echo -e "${GREEN}✓ Helm ya instalado: $HELM_INSTALLED_VERSION${NC}"
-  echo "::endgroup::"
 else
   echo "Helm no está instalado, procediendo con instalación..."
   echo "::endgroup::"
@@ -92,27 +91,69 @@ else
     exit 1
   fi
   echo -e "${GREEN}✓ Helm instalado correctamente${NC}"
-  echo "::endgroup::"
 fi
+echo "::endgroup::"
+
+echo "::group::Verificando que Helm puede acceder al cluster"
+# Asegurar que KUBECONFIG está disponible para helm
+export KUBECONFIG
+MAX_HELM_RETRIES=10
+i=0
+while [ $i -lt $MAX_HELM_RETRIES ]; do
+  if helm list -A >/dev/null 2>&1; then
+    echo -e "${GREEN}✓ Helm puede acceder al cluster${NC}"
+    break
+  fi
+  
+  i=$((i+1))
+  if [ $i -eq $MAX_HELM_RETRIES ]; then
+    echo -e "${RED}ERROR: Helm no puede acceder al cluster después de $MAX_HELM_RETRIES intentos${NC}"
+    echo ""
+    echo "Diagnosis:"
+    echo "1. Verificar KUBECONFIG: echo \$KUBECONFIG"
+    echo "2. Verificar archivo existe: ls -la \$KUBECONFIG"
+    echo "3. Verificar permisos: stat -c '%a' \$KUBECONFIG"
+    echo "4. Probar kubectl: kubectl get nodes"
+    exit 1
+  fi
+  
+  echo "  Intento $i/$MAX_HELM_RETRIES: esperando conexión de Helm..."
+  sleep 2
+done
+echo "::endgroup::"
 
 echo "::group::Actualizando repositorios de Helm"
-# Verificar si hay repositorios configurados
-REPOS_COUNT=$(helm repo list 2>/dev/null | tail -n +2 | wc -l)
+# Contar repositorios configurados con manejo de errores
+REPOS_LIST=$(helm repo list 2>/dev/null || echo "")
+REPOS_COUNT=$(echo "$REPOS_LIST" | tail -n +2 | grep -c . || echo "0")
 
 if [ "$REPOS_COUNT" -gt 0 ]; then
-  retry helm repo update
-  echo -e "${GREEN}✓ Repositorios actualizados${NC}"
+  echo "Repositorios encontrados: $REPOS_COUNT"
+  if ! retry helm repo update; then
+    echo -e "${YELLOW}⚠ Advertencia: Falló actualizar repositorios, pero continuando...${NC}"
+    echo "  Los repositorios se pueden actualizar más tarde manualmente"
+  else
+    echo -e "${GREEN}✓ Repositorios actualizados correctamente${NC}"
+  fi
 else
   echo -e "${YELLOW}⚠ No hay repositorios de Helm configurados${NC}"
   echo "  (Se configurarán cuando se instalen los charts)"
 fi
 echo "::endgroup::"
 
-echo "::group::Verificando estado de Helm"
-HELM_VERSION_OUTPUT=$(helm version --short)
+echo "::group::Verificando estado final de Helm"
+HELM_VERSION_OUTPUT=$(helm version --short 2>/dev/null || echo 'desconocida')
 echo "Versión de Helm: $HELM_VERSION_OUTPUT"
-HELM_REPOS_COUNT=$(helm repo list | tail -n +2 | wc -l)
+
+HELM_REPOS=$(helm repo list 2>/dev/null || echo "")
+HELM_REPOS_COUNT=$(echo "$HELM_REPOS" | tail -n +2 | grep -c . || echo "0")
 echo "Repositorios configurados: $HELM_REPOS_COUNT"
+
+if helm list -A >/dev/null 2>&1; then
+  echo -e "${GREEN}✓ Helm operativo y conectado al cluster${NC}"
+else
+  echo -e "${YELLOW}⚠ Aviso: Helm está instalado pero puede haber problemas de conectividad${NC}"
+fi
 echo "::endgroup::"
 
-echo -e "${GREEN}bootstrap_helm.sh completado correctamente${NC}"
+echo -e "${GREEN}✓ bootstrap_helm.sh completado correctamente${NC}"
