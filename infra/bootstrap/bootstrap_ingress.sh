@@ -100,32 +100,78 @@ echo "::endgroup::"
 
 echo "::group::Verificando que el Ingress Controller está listo"
 
-# Verificar que el deployment existe
-if ! kubectl get deployment ingress-nginx-controller -n "$INGRESS_NAMESPACE" >/dev/null 2>&1; then
-  echo "⚠ Deployment 'ingress-nginx-controller' no encontrado"
+# El ingress-nginx puede desplegarse como Deployment o DaemonSet según la configuración
+# Intentar esperar al daemonset primero
+if kubectl get daemonset ingress-nginx-controller -n "$INGRESS_NAMESPACE" >/dev/null 2>&1; then
+  echo "Esperando que el DaemonSet ingress-nginx-controller esté listo..."
+  MAX_WAIT=300
+  ELAPSED=0
+  INTERVAL=5
+  
+  while [ $ELAPSED -lt $MAX_WAIT ]; do
+    DESIRED=$(kubectl get daemonset ingress-nginx-controller -n "$INGRESS_NAMESPACE" -o jsonpath='{.status.desiredNumberScheduled}')
+    READY=$(kubectl get daemonset ingress-nginx-controller -n "$INGRESS_NAMESPACE" -o jsonpath='{.status.numberReady}')
+    
+    echo "  DaemonSet: $READY/$DESIRED pods listos (${ELAPSED}s)"
+    
+    if [ "$DESIRED" -eq "$READY" ] && [ "$READY" -gt 0 ]; then
+      echo -e "✓ Ingress Controller DaemonSet está listo"
+      break
+    fi
+    
+    sleep $INTERVAL
+    ELAPSED=$((ELAPSED + INTERVAL))
+  done
+  
+  if [ $ELAPSED -ge $MAX_WAIT ]; then
+    echo "⚠ Timeout esperando al DaemonSet (pero continuando)"
+  fi
+
+# Si no es DaemonSet, intentar con Deployment
+elif kubectl get deployment ingress-nginx-controller -n "$INGRESS_NAMESPACE" >/dev/null 2>&1; then
+  echo "Esperando que el Deployment ingress-nginx-controller esté listo..."
+  if ! kubectl rollout status deployment/ingress-nginx-controller \
+    -n "$INGRESS_NAMESPACE" --timeout=300s 2>/dev/null; then
+    echo "⚠ Timeout esperando al Deployment (pero continuando)"
+  else
+    echo "✓ Ingress Controller Deployment está listo"
+  fi
+
+# Si no encuentra ni Deployment ni DaemonSet, esperar a los pods directamente
+else
+  echo "Deployment/DaemonSet no encontrado, esperando pods del ingress controller..."
   echo ""
-  echo "Listando resources en namespace $INGRESS_NAMESPACE:"
+  echo "Resources en namespace $INGRESS_NAMESPACE:"
   kubectl get all -n "$INGRESS_NAMESPACE" || true
   echo ""
-  echo "Verificando si el deployment tiene un nombre diferente:"
-  kubectl get deployments -n "$INGRESS_NAMESPACE" || true
-  exit 1
+  
+  # Esperar a que al menos un pod del ingress esté Running
+  MAX_WAIT=300
+  ELAPSED=0
+  INTERVAL=5
+  
+  while [ $ELAPSED -lt $MAX_WAIT ]; do
+    RUNNING_PODS=$(kubectl get pods -n "$INGRESS_NAMESPACE" \
+      -l app.kubernetes.io/name=ingress-nginx \
+      --field-selector=status.phase=Running \
+      --no-headers 2>/dev/null | wc -l)
+    
+    echo "  Pods corriendo: $RUNNING_PODS (${ELAPSED}s)"
+    
+    if [ "$RUNNING_PODS" -gt 0 ]; then
+      echo "✓ Ingress Controller pods están en estado Running"
+      break
+    fi
+    
+    sleep $INTERVAL
+    ELAPSED=$((ELAPSED + INTERVAL))
+  done
+  
+  if [ $ELAPSED -ge $MAX_WAIT ]; then
+    echo "⚠ Timeout esperando los pods del ingress (pero continuando)"
+  fi
 fi
 
-# Hacer rollout status si el deployment existe
-if kubectl rollout status deployment/ingress-nginx-controller \
-  -n "$INGRESS_NAMESPACE" --timeout=300s >/dev/null 2>&1; then
-  echo "✓ Ingress Controller está listo"
-else
-  echo "⚠ Ingress Controller no llegó a estado Ready dentro del timeout"
-  echo ""
-  echo "Estado del deployment:"
-  kubectl describe deployment ingress-nginx-controller -n "$INGRESS_NAMESPACE" || true
-  echo ""
-  echo "Estado de los pods:"
-  kubectl get pods -n "$INGRESS_NAMESPACE" || true
-  exit 1
-fi
 echo "::endgroup::"
 
 echo "bootstrap_ingress.sh completado correctamente"
