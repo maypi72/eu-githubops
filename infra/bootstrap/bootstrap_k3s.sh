@@ -10,9 +10,12 @@ K3S_INSTALL_SCRIPT_URL="https://get.k3s.io"
 # Opciones fijas de instalación para deshabilitar componentes y usar Calico
 K3S_EXEC_OPTS="--disable traefik --disable servicelb --flannel-backend=none --disable-network-policy --write-kubeconfig-mode 644"
 
-# Configuración de Calico
-CALICO_VERSION="${CALICO_VERSION:-3.27.2}"
-CALICO_MANIFEST_URL="https://raw.githubusercontent.com/projectcalico/calico/v${CALICO_VERSION}/manifests/calico.yaml"
+# Configuración de Calico (usando Operator, CRDs y Custom Resources)
+CALICO_VERSION="${CALICO_VERSION:-3.30.7}"
+CALICO_BASE_URL="https://raw.githubusercontent.com/projectcalico/calico/v${CALICO_VERSION}/manifests"
+CALICO_CRDS_URL="${CALICO_BASE_URL}/operator-crds.yaml"
+CALICO_OPERATOR_URL="${CALICO_BASE_URL}/tigera-operator.yaml"
+CALICO_CUSTOM_RESOURCES_URL="${CALICO_BASE_URL}/custom-resources.yaml"
 
 retry() {
   local -r max=${RETRY_MAX:-5}
@@ -27,6 +30,25 @@ retry() {
     echo "Retry $i/$max: $*"
     sleep $((delay * i))
   done
+}
+
+install_calico() {
+  echo "📦 Instalando CRDs de Calico..."
+  retry kubectl apply -f "${CALICO_CRDS_URL}"
+
+  echo "📦 Instalando Tigera Operator..."
+  retry kubectl apply -f "${CALICO_OPERATOR_URL}"
+
+  echo "📦 Esperando a que el Operator esté listo..."
+  retry kubectl wait --for=condition=Ready pod -l k8s-app=tigera-operator -n tigera-operator --timeout=300s
+
+  echo "📦 Aplicando Custom Resources de Calico..."
+  retry kubectl apply -f "${CALICO_CUSTOM_RESOURCES_URL}"
+
+  echo "📦 Esperando a que Calico esté completamente listo..."
+  retry kubectl wait --for=condition=DaemonSetReady tigerastatus/calico -n calico-system --timeout=300s
+  
+  echo "✓ Calico instalado correctamente"
 }
 
 echo "::group::Preparando sistema"
@@ -85,6 +107,14 @@ else
   echo "Esperando a que k3s.service inicie..."
   sleep 5
   
+  echo "::endgroup::"
+  
+  echo "::group::Instalando Calico CNI (CRÍTICO para que el nodo sea Ready)"
+  # Calico DEBE instalarse INMEDIATAMENTE después de k3s para que el nodo pueda estar Ready
+  install_calico
+  echo "::endgroup::"
+  
+  echo "::group::Verificando que k3s.service está activo"
   # Verificar que el servicio está activo
   if ! systemctl is-active --quiet k3s; then
     echo "ERROR: k3s.service no está activo"
@@ -158,38 +188,6 @@ echo "::endgroup::"
 echo "::group::Esperando a que el nodo sea visible en el cluster"
 # El nodo estará NotReady hasta que instalemos el CNI (Calico)
 retry kubectl get nodes
-echo "::endgroup::"
-
-echo "::group::Instalando Calico CNI (CRÍTICO para que el nodo sea Ready)"
-# Calico DEBE instalarse ANTES de esperar que el nodo sea Ready
-# porque sin CNI, el nodo permanecerá en estado NotReady indefinidamente
-MAX_ATTEMPTS=5
-ATTEMPT=0
-while [ $ATTEMPT -lt $MAX_ATTEMPTS ]; do
-  ATTEMPT=$((ATTEMPT + 1))
-  echo "Intento $ATTEMPT/$MAX_ATTEMPTS: Instalando Calico desde $CALICO_MANIFEST_URL"
-  
-  if kubectl apply -f "${CALICO_MANIFEST_URL}"; then
-    echo "✓ Manifiesto de Calico aplicado exitosamente"
-    break
-  else
-    if [ $ATTEMPT -lt $MAX_ATTEMPTS ]; then
-      echo "⚠ Falló la aplicación del manifiesto, reintentando en 5 segundos..."
-      sleep 5
-    else
-      echo "ERROR: No se pudo aplicar el manifiesto de Calico después de $MAX_ATTEMPTS intentos"
-      exit 1
-    fi
-  fi
-done
-
-# Esperar a que Calico esté listo
-echo "Esperando a que el DaemonSet de Calico esté listo..."
-if retry kubectl rollout status ds/calico-node -n calico-system --timeout=300s; then
-  echo "✓ Calico DaemonSet Ready"
-else
-  echo "⚠ Timeout esperando a Calico, intentando continuar..."
-fi
 echo "::endgroup::"
 
 echo "::group::Esperando a que el nodo esté Ready (ahora que Calico está listo)"
