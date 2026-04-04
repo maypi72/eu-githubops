@@ -11,8 +11,8 @@ K3S_INSTALL_SCRIPT_URL="https://get.k3s.io"
 K3S_EXEC_OPTS="--disable traefik --disable servicelb --flannel-backend=none --disable-network-policy --write-kubeconfig-mode 644"
 
 # Configuración de Calico
-CALICO_VERSION="${CALICO_VERSION:-v3.27.2}"
-CALICO_MANIFEST_URL="https://raw.githubusercontent.com/projectcalico/calico/${CALICO_VERSION}/manifests/calico.yaml"
+CALICO_VERSION="${CALICO_VERSION:-3.27.2}"
+CALICO_MANIFEST_URL="https://raw.githubusercontent.com/projectcalico/calico/v${CALICO_VERSION}/manifests/calico.yaml"
 
 retry() {
   local -r max=${RETRY_MAX:-5}
