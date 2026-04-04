@@ -145,6 +145,13 @@ install_calico() {
   echo "::endgroup::"
 }
 
+is_calico_installed() {
+  # Verificar si los pods de Calico están running
+  if kubectl get pods -n calico-system -o jsonpath='{.items[*].status.phase}' 2>/dev/null | grep -q "Running"; then
+    return 0
+  fi
+  return 1
+}
 
 wait_for_calico_ready() {
   echo "::group::Esperando a que Calico esté completamente listo"
@@ -185,7 +192,17 @@ BOOTSTRAP_KUBECONFIG=/etc/rancher/k3s/k3s.yaml
 export KUBECONFIG=$BOOTSTRAP_KUBECONFIG
 
 wait_for_openapi_ready
-install_calico
+
+echo "::group::Comprobando si Calico ya está instalado"
+if is_calico_installed; then
+  echo -e "${GREEN}✓ Calico ya está instalado${NC}"
+  echo "::endgroup::"
+else
+  echo "Calico no está instalado, procediendo con instalación..."
+  echo "::endgroup::"
+  install_calico
+fi
+
 wait_for_calico_ready
 wait_for_node_ready
 
