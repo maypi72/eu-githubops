@@ -25,6 +25,7 @@ env:
   RETRY_MAX: 5
   RETRY_DELAY: 2
   ARTIFACT_DIR: $HOME/bootstrap-artifacts
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
 
 jobs:
   bootstrap:
