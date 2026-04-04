@@ -124,22 +124,27 @@ wait_for_openapi_ready() {
 
 install_calico() {
   echo "::group::Instalando Calico CNI"
-  echo "📦 Instalando CRDs de Calico..."
-  retry kubectl apply -f "${CALICO_CRDS_URL}" --validate=false
+
+  echo "📦 Instalando CRDs de Calico (server-side apply)..."
+  # Limpiar anotación gigante si existe
+  kubectl annotate crd installations.operator.tigera.io kubectl.kubernetes.io/last-applied-configuration- >/dev/null 2>&1 || true
+
+  retry kubectl apply --server-side --force-conflicts -f "${CALICO_CRDS_URL}"
 
   echo "📦 Instalando Tigera Operator..."
-  retry kubectl apply -f "${CALICO_OPERATOR_URL}" --validate=false
+  retry kubectl apply --server-side --force-conflicts -f "${CALICO_OPERATOR_URL}"
 
   echo "📦 Esperando a que el Operator esté listo..."
   sleep 10
   retry kubectl wait --for=condition=Ready pod -l k8s-app=tigera-operator -n tigera-operator --timeout=300s
 
   echo "📦 Aplicando Custom Resources de Calico..."
-  retry kubectl apply -f "${CALICO_CUSTOM_RESOURCES_URL}" --validate=false
+  retry kubectl apply --server-side --force-conflicts -f "${CALICO_CUSTOM_RESOURCES_URL}"
 
   echo -e "${GREEN}✓ Calico instalado correctamente${NC}"
   echo "::endgroup::"
 }
+
 
 wait_for_calico_ready() {
   echo "::group::Esperando a que Calico esté completamente listo"
