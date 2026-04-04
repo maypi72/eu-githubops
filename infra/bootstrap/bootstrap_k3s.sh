@@ -194,11 +194,12 @@ export KUBECONFIG
 mkdir -p "$(dirname "$KUBECONFIG")"
 
 echo "Copiando kubeconfig de /etc/rancher/k3s/k3s.yaml a $KUBECONFIG..."
-if ! sudo cat /etc/rancher/k3s/k3s.yaml > "$KUBECONFIG"; then
+if ! sudo cp /etc/rancher/k3s/k3s.yaml "$KUBECONFIG"; then
   echo -e "${RED}ERROR: No se pudo copiar el kubeconfig${NC}"
   exit 1
 fi
-chmod 600 "$KUBECONFIG"
+sudo chmod 600 "$KUBECONFIG"
+sudo chown "$(id -u):$(id -g)" "$KUBECONFIG"
 echo -e "${GREEN}✓ KUBECONFIG disponible: $KUBECONFIG${NC}"
 echo "::endgroup::"
 
