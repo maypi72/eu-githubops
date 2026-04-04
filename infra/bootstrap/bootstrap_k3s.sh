@@ -187,9 +187,20 @@ fi
 
 install_k3s
 
-# Usar el kubeconfig de K3s para todas las llamadas a kubectl del bootstrap
-BOOTSTRAP_KUBECONFIG=/etc/rancher/k3s/k3s.yaml
-export KUBECONFIG=$BOOTSTRAP_KUBECONFIG
+# Copiar kubeconfig temprano para que esté disponible para sus scripts
+echo "::group::Configurando KUBECONFIG"
+KUBECONFIG="${KUBECONFIG:-${HOME}/kubeconfig}"
+export KUBECONFIG
+mkdir -p "$(dirname "$KUBECONFIG")"
+
+echo "Copiando kubeconfig de /etc/rancher/k3s/k3s.yaml a $KUBECONFIG..."
+if ! sudo cat /etc/rancher/k3s/k3s.yaml > "$KUBECONFIG"; then
+  echo -e "${RED}ERROR: No se pudo copiar el kubeconfig${NC}"
+  exit 1
+fi
+chmod 600 "$KUBECONFIG"
+echo -e "${GREEN}✓ KUBECONFIG disponible: $KUBECONFIG${NC}"
+echo "::endgroup::"
 
 wait_for_openapi_ready
 
@@ -206,79 +217,14 @@ fi
 wait_for_calico_ready
 wait_for_node_ready
 
-echo "::group::Preparando kubeconfig para el runner"
-FINAL_KUBECONFIG="${HOME}/kubeconfig"
-
-# Función para esperar y copiar kubeconfig con reintentos
-copy_kubeconfig_with_retry() {
-  local source="/etc/rancher/k3s/k3s.yaml"
-  local dest="$FINAL_KUBECONFIG"
-  local max_attempts=30
-  local attempt=1
-  
-  echo "Esperando a que $source esté disponible..."
-  
-  while [ $attempt -le $max_attempts ]; do
-    if [ -f "$source" ]; then
-      echo "Archivo encontrado en intento $attempt"
-      break
-    fi
-    
-    if [ $attempt -eq $max_attempts ]; then
-      echo -e "${RED}ERROR: $source no encontrado después de $max_attempts intentos${NC}"
-      echo ""
-      echo "Diagnosis:"
-      echo "1. Verificar que k3s está activo:"
-      systemctl status k3s || true
-      echo ""
-      echo "2. Verificar logs de k3s:"
-      journalctl -xeu k3s.service -n 30 || true
-      echo ""
-      echo "3. Verificar que el servicio está corriendo:"
-      ps aux | grep -i k3s | grep -v grep || echo "No k3s process found"
-      echo ""
-      echo "Para reinstalar, ejecuta: sudo /usr/local/bin/k3s-uninstall.sh && rm -rf /etc/rancher"
-      return 1
-    fi
-    
-    echo "  Intento $attempt/$max_attempts: esperando..."
-    sleep 2
-    attempt=$((attempt + 1))
-  done
-  
-  # Crear directorio si no existe
-  mkdir -p "$(dirname "$dest")"
-  
-  echo "Copiando kubeconfig desde $source..."
-  # Usar sudo cat para garantizar acceso al archivo propiedad de root
-  if ! sudo cat "$source" > "$dest"; then
-    echo -e "${RED}ERROR: No se pudo copiar kubeconfig${NC}"
-    return 1
-  fi
-  
-  echo "Estableciendo permisos restrictivos..."
-  if ! chmod 600 "$dest"; then
-    echo -e "${YELLOW}⚠ Advertencia: No se pudo cambiar permisos a 600${NC}"
-    echo "  Continuando con permisos actuales"
-  fi
-  
-  # Verificar que el archivo se copió correctamente
-  if [ ! -f "$dest" ]; then
-    echo -e "${RED}ERROR: kubeconfig no existe después de copiar${NC}"
-    return 1
-  fi
-  
-  return 0
-}
-
-if ! copy_kubeconfig_with_retry; then
+echo "::group::Verificando kubeconfig"
+if [ ! -f "$KUBECONFIG" ]; then
+  echo -e "${RED}ERROR: kubeconfig no disponible en $KUBECONFIG${NC}"
   exit 1
 fi
-
-export KUBECONFIG=$FINAL_KUBECONFIG
-echo -e "${GREEN}✓ KUBECONFIG preparado en $FINAL_KUBECONFIG${NC}"
-echo -e "${GREEN}✓ Tamaño: $(du -h "$FINAL_KUBECONFIG" | cut -f1)${NC}"
-echo -e "${GREEN}✓ Permisos: $(stat -c '%a' "$FINAL_KUBECONFIG" 2>/dev/null || echo 'desconocidos')${NC}"
+echo -e "${GREEN}✓ KUBECONFIG disponible en $KUBECONFIG${NC}"
+echo -e "${GREEN}✓ Tamaño: $(du -h "$KUBECONFIG" | cut -f1)${NC}"
+echo -e "${GREEN}✓ Permisos: $(stat -c '%a' "$KUBECONFIG" 2>/dev/null || echo 'desconocidos')${NC}"
 echo "::endgroup::"
 
 echo "::group::Esperando a que el nodo sea visible en el cluster"
