@@ -17,6 +17,12 @@ CALICO_CRDS_URL="${CALICO_BASE_URL}/operator-crds.yaml"
 CALICO_OPERATOR_URL="${CALICO_BASE_URL}/tigera-operator.yaml"
 CALICO_CUSTOM_RESOURCES_URL="${CALICO_BASE_URL}/custom-resources.yaml"
 
+# Colores
+GREEN='\033[0;32m'
+YELLOW='\033[1;33m'
+RED='\033[0;31m'
+NC='\033[0m'
+
 retry() {
   local -r max=${RETRY_MAX:-5}
   local -r delay=${RETRY_DELAY:-2}
@@ -24,7 +30,7 @@ retry() {
   until "$@"; do
     i=$((i+1))
     if [ $i -ge $max ]; then
-      echo "Command failed after $i attempts: $*"
+      echo -e "${RED}Command failed after $i attempts: $*${NC}"
       return 1
     fi
     echo "Retry $i/$max: $*"
@@ -38,18 +44,18 @@ install_dependencies() {
 
   # Verificar puertos disponibles
   echo "Verificando puertos disponibles:"
-  netstat -tuln 2>/dev/null | grep -E ":6443|:10250" || echo "⚠ Puerto 6443 (API) disponible"
+  netstat -tuln 2>/dev/null | grep -E ":6443|:10250" || echo -e "${YELLOW}⚠ Puerto 6443 (API) disponible${NC}"
 
   # Verificar conectividad DNS
   echo ""
   echo "Verificando DNS:"
   if nslookup kubernetes.default.svc.cluster.local 8.8.8.8 >/dev/null 2>&1 || true; then
-    echo "✓ DNS funcional"
+    echo -e "${GREEN}✓ DNS funcional${NC}"
   fi
 
   # Limpiar instalación antigua si existe
   if [ -d "/var/lib/rancher/k3s" ]; then
-    echo "⚠ Directorio /var/lib/rancher/k3s ya existe"
+    echo -e "${YELLOW}⚠ Directorio /var/lib/rancher/k3s ya existe${NC}"
     echo "  Si hay problemas, considera: sudo rm -rf /var/lib/rancher/k3s"
   fi
 
@@ -84,7 +90,7 @@ install_k3s() {
     INSTALL_K3S_CHANNEL="${K3S_CHANNEL}" \
     INSTALL_K3S_EXEC="server ${K3S_EXEC_OPTS}" \
     sh -s -; then
-    echo "ERROR: Falló la ejecución del script de instalación de k3s"
+    echo -e "${RED}ERROR: Falló la ejecución del script de instalación de k3s${NC}"
     exit 1
   fi
 
@@ -94,7 +100,7 @@ install_k3s() {
 
   # Verificar que el servicio está activo
   if ! systemctl is-active --quiet k3s; then
-    echo "ERROR: k3s.service no está activo"
+    echo -e "${RED}ERROR: k3s.service no está activo${NC}"
     echo ""
     echo "Estado del servicio k3s:"
     systemctl status k3s || true
@@ -104,7 +110,7 @@ install_k3s() {
     exit 1
   fi
 
-  echo "✓ k3s instalado y servicio activo"
+  echo -e "${GREEN}✓ k3s instalado y servicio activo${NC}"
   echo "::endgroup::"
 }
 
@@ -112,7 +118,7 @@ wait_for_openapi_ready() {
   echo "::group::Esperando a que el API server esté plenamente disponible"
   echo "⏳ Esperando a que OpenAPI esté listo..."
   retry kubectl cluster-info
-  echo "✓ API server está disponible"
+  echo -e "${GREEN}✓ API server está disponible${NC}"
   echo "::endgroup::"
 }
 
@@ -131,7 +137,7 @@ install_calico() {
   echo "📦 Aplicando Custom Resources de Calico..."
   retry kubectl apply -f "${CALICO_CUSTOM_RESOURCES_URL}" --validate=false
 
-  echo "✓ Calico instalado correctamente"
+  echo -e "${GREEN}✓ Calico instalado correctamente${NC}"
   echo "::endgroup::"
 }
 
@@ -139,14 +145,14 @@ wait_for_calico_ready() {
   echo "::group::Esperando a que Calico esté completamente listo"
   echo "⏳ Esperando a que Calico esté listo..."
   retry kubectl -n calico-system wait --for=condition=Available deployment --all --timeout=180s
-  echo "✓ Calico está listo"
+  echo -e "${GREEN}✓ Calico está listo${NC}"
   echo "::endgroup::"
 }
 
 wait_for_node_ready() {
   echo "::group::Esperando a que el nodo esté Ready"
   retry kubectl wait --for=condition=Ready node --all --timeout=300s
-  echo "✓ Nodo está Ready"
+  echo -e "${GREEN}✓ Nodo está Ready${NC}"
   echo "::endgroup::"
 }
 
@@ -167,7 +173,7 @@ KUBECONFIG="${KUBECONFIG:-$HOME/kubeconfig}"
 
 # Comprobar que el archivo fuente existe
 if [ ! -f "/etc/rancher/k3s/k3s.yaml" ]; then
-  echo "ERROR: /etc/rancher/k3s/k3s.yaml no encontrado"
+  echo -e "${RED}ERROR: /etc/rancher/k3s/k3s.yaml no encontrado${NC}"
   echo ""
   echo "Diagnosis:"
   echo "1. Verificar que k3s está activo:"
@@ -189,10 +195,10 @@ mkdir -p "$(dirname "$KUBECONFIG")"
 # Copiar kubeconfig (ahora readable gracias a --write-kubeconfig-mode 644)
 echo "Copiando kubeconfig desde /etc/rancher/k3s/k3s.yaml..."
 if ! cp /etc/rancher/k3s/k3s.yaml "$KUBECONFIG"; then
-  echo "ERROR: No se pudo copiar kubeconfig"
+  echo -e "${RED}ERROR: No se pudo copiar kubeconfig${NC}"
   echo "Intentando con sudo..."
   if ! sudo cat /etc/rancher/k3s/k3s.yaml > "$KUBECONFIG"; then
-    echo "ERROR: No se pudo copiar kubeconfig (permiso denegado)"
+    echo -e "${RED}ERROR: No se pudo copiar kubeconfig (permiso denegado)${NC}"
     exit 1
   fi
 fi
@@ -200,20 +206,20 @@ fi
 # Cambiar permisos para que solo el owner pueda leer/escribir (más seguro)
 echo "Estableciendo permisos restrictivos..."
 if ! chmod 600 "$KUBECONFIG"; then
-  echo "⚠ Advertencia: No se pudo cambiar permisos a 600"
+  echo -e "${YELLOW}⚠ Advertencia: No se pudo cambiar permisos a 600${NC}"
   echo "  Continuando con permisos actuales"
 fi
 
 # Verificar que el archivo se copió correctamente
 if [ ! -f "$KUBECONFIG" ]; then
-  echo "ERROR: kubeconfig no existe después de copiar"
+  echo -e "${RED}ERROR: kubeconfig no existe después de copiar${NC}"
   exit 1
 fi
 
 export KUBECONFIG
-echo "✓ KUBECONFIG preparado en $KUBECONFIG"
-echo "✓ Tamaño: $(du -h "$KUBECONFIG" | cut -f1)"
-echo "✓ Permisos: $(stat -c '%a' "$KUBECONFIG" 2>/dev/null || echo 'desconocidos')"
+echo -e "${GREEN}✓ KUBECONFIG preparado en $KUBECONFIG${NC}"
+echo -e "${GREEN}✓ Tamaño: $(du -h "$KUBECONFIG" | cut -f1)${NC}"
+echo -e "${GREEN}✓ Permisos: $(stat -c '%a' "$KUBECONFIG" 2>/dev/null || echo 'desconocidos')${NC}"
 echo "::endgroup::"
 
 echo "::group::Esperando a que el nodo sea visible en el cluster"
@@ -237,11 +243,11 @@ while [ $ELAPSED -lt $TIMEOUT_SECONDS ]; do
   
   TOTAL=$((RUNNING_PODS + SUCCEEDED_PODS + NOT_READY))
   
-  echo "✓ Pods en kube-system: Running=$RUNNING_PODS | Succeeded=$SUCCEEDED_PODS | Otros=$NOT_READY | Total=$TOTAL | Tiempo: ${ELAPSED}s"
+  echo -e "${GREEN}✓${NC} Pods en kube-system: Running=$RUNNING_PODS | Succeeded=$SUCCEEDED_PODS | Otros=$NOT_READY | Total=$TOTAL | Tiempo: ${ELAPSED}s"
   
   # Si todos los pods estén listos, salir
   if [ $NOT_READY -eq 0 ] && [ $TOTAL -gt 0 ]; then
-    echo "✓ ¡Todos los pods de K3s están Running o Succeeded!"
+    echo -e "${GREEN}✓ ¡Todos los pods de K3s están Running o Succeeded!${NC}"
     break
   fi
   
@@ -250,12 +256,12 @@ while [ $ELAPSED -lt $TIMEOUT_SECONDS ]; do
 done
 
 if [ $NOT_READY -gt 0 ]; then
-  echo "⚠ Algunos pods aún no están Ready, continuando..."
+  echo -e "${YELLOW}⚠ Algunos pods aún no están Ready, continuando...${NC}"
   echo ""
   echo "Pods no listos en kube-system:"
   kubectl get pods -n kube-system --field-selector=status.phase!=Running,status.phase!=Succeeded || true
 fi
 echo "::endgroup::"
 
-echo "✓ ¡Bootstrap completado exitosamente!"
+echo -e "${GREEN}✓ ¡Bootstrap completado exitosamente!${NC}"
 
