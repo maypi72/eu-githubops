@@ -170,7 +170,8 @@ install_dependencies
 install_k3s
 
 # Usar el kubeconfig de K3s para todas las llamadas a kubectl del bootstrap
-export KUBECONFIG=/etc/rancher/k3s/k3s.yaml
+BOOTSTRAP_KUBECONFIG=/etc/rancher/k3s/k3s.yaml
+export KUBECONFIG=$BOOTSTRAP_KUBECONFIG
 
 wait_for_openapi_ready
 install_calico
@@ -178,7 +179,7 @@ wait_for_calico_ready
 wait_for_node_ready
 
 echo "::group::Preparando kubeconfig para el runner"
-KUBECONFIG="${KUBECONFIG:-$HOME/kubeconfig}"
+FINAL_KUBECONFIG="${HOME}/kubeconfig"
 
 # Comprobar que el archivo fuente existe
 if [ ! -f "/etc/rancher/k3s/k3s.yaml" ]; then
@@ -199,36 +200,34 @@ if [ ! -f "/etc/rancher/k3s/k3s.yaml" ]; then
 fi
 
 # Crear directorio si no existe
-mkdir -p "$(dirname "$KUBECONFIG")"
+mkdir -p "$(dirname "$FINAL_KUBECONFIG")"
 
-# Copiar kubeconfig (ahora readable gracias a --write-kubeconfig-mode 644)
 echo "Copiando kubeconfig desde /etc/rancher/k3s/k3s.yaml..."
-if ! cp /etc/rancher/k3s/k3s.yaml "$KUBECONFIG"; then
+if ! cp /etc/rancher/k3s/k3s.yaml "$FINAL_KUBECONFIG"; then
   echo -e "${RED}ERROR: No se pudo copiar kubeconfig${NC}"
   echo "Intentando con sudo..."
-  if ! sudo cat /etc/rancher/k3s/k3s.yaml > "$KUBECONFIG"; then
+  if ! sudo cat /etc/rancher/k3s/k3s.yaml > "$FINAL_KUBECONFIG"; then
     echo -e "${RED}ERROR: No se pudo copiar kubeconfig (permiso denegado)${NC}"
     exit 1
   fi
 fi
 
-# Cambiar permisos para que solo el owner pueda leer/escribir (más seguro)
 echo "Estableciendo permisos restrictivos..."
-if ! chmod 600 "$KUBECONFIG"; then
+if ! chmod 600 "$FINAL_KUBECONFIG"; then
   echo -e "${YELLOW}⚠ Advertencia: No se pudo cambiar permisos a 600${NC}"
   echo "  Continuando con permisos actuales"
 fi
 
 # Verificar que el archivo se copió correctamente
-if [ ! -f "$KUBECONFIG" ]; then
+if [ ! -f "$FINAL_KUBECONFIG" ]; then
   echo -e "${RED}ERROR: kubeconfig no existe después de copiar${NC}"
   exit 1
 fi
 
-export KUBECONFIG
-echo -e "${GREEN}✓ KUBECONFIG preparado en $KUBECONFIG${NC}"
-echo -e "${GREEN}✓ Tamaño: $(du -h "$KUBECONFIG" | cut -f1)${NC}"
-echo -e "${GREEN}✓ Permisos: $(stat -c '%a' "$KUBECONFIG" 2>/dev/null || echo 'desconocidos')${NC}"
+export KUBECONFIG=$FINAL_KUBECONFIG
+echo -e "${GREEN}✓ KUBECONFIG preparado en $FINAL_KUBECONFIG${NC}"
+echo -e "${GREEN}✓ Tamaño: $(du -h "$FINAL_KUBECONFIG" | cut -f1)${NC}"
+echo -e "${GREEN}✓ Permisos: $(stat -c '%a' "$FINAL_KUBECONFIG" 2>/dev/null || echo 'desconocidos')${NC}"
 echo "::endgroup::"
 
 echo "::group::Esperando a que el nodo sea visible en el cluster"
