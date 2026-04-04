@@ -14,7 +14,7 @@ BOOTSTRAP_HELM="${SCRIPT_DIR}/bootstrap_helm.sh"
 BOOTSTRAP_INGRESS="${SCRIPT_DIR}/bootstrap_ingress.sh"
 
 # Variables globales
-KUBECONFIG="${KUBECONFIG:-$HOME/kubeconfig}"
+KUBECONFIG="${KUBECONFIG:-${HOME}/kubeconfig}"
 export KUBECONFIG
 
 echo "::group::Validación inicial"
