@@ -31,11 +31,30 @@ echo "::group::Comprobando KUBECONFIG"
 KUBECONFIG="${KUBECONFIG:-$HOME/kubeconfig}"
 export KUBECONFIG
 
-if [ ! -f "$KUBECONFIG" ]; then
-  echo "ERROR: KUBECONFIG no existe en: $KUBECONFIG"
-  exit 1
-fi
-echo "✓ Usando KUBECONFIG: $KUBECONFIG"
+echo "Comprobando KUBECONFIG en: $KUBECONFIG"
+
+# Reintentos para esperar a que KUBECONFIG esté disponible
+MAX_RETRIES=30
+RETRY_DELAY=2
+for i in $(seq 1 $MAX_RETRIES); do
+  if [ -f "$KUBECONFIG" ]; then
+    echo "✓ Usando KUBECONFIG: $KUBECONFIG"
+    break
+  fi
+  
+  if [ $i -eq $MAX_RETRIES ]; then
+    echo "ERROR: KUBECONFIG no existe en: $KUBECONFIG"
+    echo ""
+    echo "Diagnosis:"
+    echo "1. Verificar que bootstrap_k3s.sh se ejecutó correctamente"
+    echo "2. Verificar estado de k3s: sudo systemctl status k3s"
+    echo "3. Verificar archivos en /etc/rancher/k3s/: ls -la /etc/rancher/k3s/"
+    exit 1
+  fi
+  
+  echo "Intento $i/$MAX_RETRIES: esperando a que KUBECONFIG esté disponible..."
+  sleep $RETRY_DELAY
+done
 echo "::endgroup::"
 
 echo "::group::Comprobando fichero de values"

@@ -181,46 +181,69 @@ wait_for_node_ready
 echo "::group::Preparando kubeconfig para el runner"
 FINAL_KUBECONFIG="${HOME}/kubeconfig"
 
-# Comprobar que el archivo fuente existe
-if [ ! -f "/etc/rancher/k3s/k3s.yaml" ]; then
-  echo -e "${RED}ERROR: /etc/rancher/k3s/k3s.yaml no encontrado${NC}"
-  echo ""
-  echo "Diagnosis:"
-  echo "1. Verificar que k3s está activo:"
-  systemctl status k3s || true
-  echo ""
-  echo "2. Verificar logs de k3s:"
-  journalctl -xeu k3s.service -n 30 || true
-  echo ""
-  echo "3. Verificar que el servicio está corriendo:"
-  ps aux | grep -i k3s | grep -v grep || echo "No k3s process found"
-  echo ""
-  echo "Para reinstalar, ejecuta: sudo /usr/local/bin/k3s-uninstall.sh && rm -rf /etc/rancher"
-  exit 1
-fi
-
-# Crear directorio si no existe
-mkdir -p "$(dirname "$FINAL_KUBECONFIG")"
-
-echo "Copiando kubeconfig desde /etc/rancher/k3s/k3s.yaml..."
-if ! cp /etc/rancher/k3s/k3s.yaml "$FINAL_KUBECONFIG"; then
-  echo -e "${RED}ERROR: No se pudo copiar kubeconfig${NC}"
-  echo "Intentando con sudo..."
-  if ! sudo cat /etc/rancher/k3s/k3s.yaml > "$FINAL_KUBECONFIG"; then
-    echo -e "${RED}ERROR: No se pudo copiar kubeconfig (permiso denegado)${NC}"
-    exit 1
+# Función para esperar y copiar kubeconfig con reintentos
+copy_kubeconfig_with_retry() {
+  local source="/etc/rancher/k3s/k3s.yaml"
+  local dest="$FINAL_KUBECONFIG"
+  local max_attempts=30
+  local attempt=1
+  
+  echo "Esperando a que $source esté disponible..."
+  
+  while [ $attempt -le $max_attempts ]; do
+    if [ -f "$source" ]; then
+      echo "Archivo encontrado en intento $attempt"
+      break
+    fi
+    
+    if [ $attempt -eq $max_attempts ]; then
+      echo -e "${RED}ERROR: $source no encontrado después de $max_attempts intentos${NC}"
+      echo ""
+      echo "Diagnosis:"
+      echo "1. Verificar que k3s está activo:"
+      systemctl status k3s || true
+      echo ""
+      echo "2. Verificar logs de k3s:"
+      journalctl -xeu k3s.service -n 30 || true
+      echo ""
+      echo "3. Verificar que el servicio está corriendo:"
+      ps aux | grep -i k3s | grep -v grep || echo "No k3s process found"
+      echo ""
+      echo "Para reinstalar, ejecuta: sudo /usr/local/bin/k3s-uninstall.sh && rm -rf /etc/rancher"
+      return 1
+    fi
+    
+    echo "  Intento $attempt/$max_attempts: esperando..."
+    sleep 2
+    attempt=$((attempt + 1))
+  done
+  
+  # Crear directorio si no existe
+  mkdir -p "$(dirname "$dest")"
+  
+  echo "Copiando kubeconfig desde $source..."
+  # Usar sudo cat para garantizar acceso al archivo propiedad de root
+  if ! sudo cat "$source" > "$dest"; then
+    echo -e "${RED}ERROR: No se pudo copiar kubeconfig${NC}"
+    return 1
   fi
-fi
+  
+  echo "Estableciendo permisos restrictivos..."
+  if ! chmod 600 "$dest"; then
+    echo -e "${YELLOW}⚠ Advertencia: No se pudo cambiar permisos a 600${NC}"
+    echo "  Continuando con permisos actuales"
+  fi
+  
+  # Verificar que el archivo se copió correctamente
+  if [ ! -f "$dest" ]; then
+    echo -e "${RED}ERROR: kubeconfig no existe después de copiar${NC}"
+    return 1
+  fi
+  
+  return 0
+}
 
-echo "Estableciendo permisos restrictivos..."
-if ! chmod 600 "$FINAL_KUBECONFIG"; then
-  echo -e "${YELLOW}⚠ Advertencia: No se pudo cambiar permisos a 600${NC}"
-  echo "  Continuando con permisos actuales"
-fi
-
-# Verificar que el archivo se copió correctamente
-if [ ! -f "$FINAL_KUBECONFIG" ]; then
-  echo -e "${RED}ERROR: kubeconfig no existe después de copiar${NC}"
+if ! copy_kubeconfig_with_retry; then
   exit 1
 fi
 

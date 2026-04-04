@@ -73,6 +73,29 @@ if ! run_bootstrap "bootstrap_k3s.sh" "$BOOTSTRAP_K3S"; then
   echo "::error::Falló la instalación de k3s. Abortando bootstrap."
   exit 1
 fi
+
+# Verificar que KUBECONFIG está disponible antes de continuar
+echo ""
+echo "Verificando disponibilidad de KUBECONFIG..."
+if [ ! -f "$KUBECONFIG" ]; then
+  echo "::error::KUBECONFIG no disponible en $KUBECONFIG después de bootstrap_k3s.sh"
+  echo ""
+  echo "Diagnosis:"
+  echo "1. Verificar estado de k3s:"
+  sudo systemctl status k3s || true
+  echo ""
+  echo "2. Verificar logs de k3s:"
+  sudo journalctl -xeu k3s.service -n 50 || true
+  echo ""
+  echo "3. Verificar archivos en /etc/rancher/k3s/:"
+  ls -la /etc/rancher/k3s/ || echo "Directorio no existe"
+  echo ""
+  echo "4. Verificar permisos del directorio:"
+  ls -la "$(dirname "$KUBECONFIG")" || echo "Directorio no existe"
+  exit 1
+fi
+
+echo "✓ KUBECONFIG disponible en: $KUBECONFIG"
 echo ""
 
 # 2. Instalar Helm
@@ -87,7 +110,6 @@ if ! run_bootstrap "bootstrap_ingress.sh" "$BOOTSTRAP_INGRESS"; then
   FAILED=1
   echo "::warning::Falló la instalación de Ingress, pero bootstrap parcial completado"
 fi
-echo ""
 
 echo "::endgroup::"
 
