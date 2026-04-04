@@ -155,8 +155,44 @@ echo "✓ Tamaño: $(du -h "$KUBECONFIG" | cut -f1)"
 echo "✓ Permisos: $(stat -c '%a' "$KUBECONFIG" 2>/dev/null || echo 'desconocidos')"
 echo "::endgroup::"
 
-echo "::group::Esperando a que el nodo esté Ready"
+echo "::group::Esperando a que el nodo sea visible en el cluster"
+# El nodo estará NotReady hasta que instalemos el CNI (Calico)
 retry kubectl get nodes
+echo "::endgroup::"
+
+echo "::group::Instalando Calico CNI (CRÍTICO para que el nodo sea Ready)"
+# Calico DEBE instalarse ANTES de esperar que el nodo sea Ready
+# porque sin CNI, el nodo permanecerá en estado NotReady indefinidamente
+MAX_ATTEMPTS=5
+ATTEMPT=0
+while [ $ATTEMPT -lt $MAX_ATTEMPTS ]; do
+  ATTEMPT=$((ATTEMPT + 1))
+  echo "Intento $ATTEMPT/$MAX_ATTEMPTS: Instalando Calico desde $CALICO_MANIFEST_URL"
+  
+  if kubectl apply -f "${CALICO_MANIFEST_URL}"; then
+    echo "✓ Manifiesto de Calico aplicado exitosamente"
+    break
+  else
+    if [ $ATTEMPT -lt $MAX_ATTEMPTS ]; then
+      echo "⚠ Falló la aplicación del manifiesto, reintentando en 5 segundos..."
+      sleep 5
+    else
+      echo "ERROR: No se pudo aplicar el manifiesto de Calico después de $MAX_ATTEMPTS intentos"
+      exit 1
+    fi
+  fi
+done
+
+# Esperar a que Calico esté listo
+echo "Esperando a que el DaemonSet de Calico esté listo..."
+if retry kubectl rollout status ds/calico-node -n calico-system --timeout=300s; then
+  echo "✓ Calico DaemonSet Ready"
+else
+  echo "⚠ Timeout esperando a Calico, intentando continuar..."
+fi
+echo "::endgroup::"
+
+echo "::group::Esperando a que el nodo esté Ready (ahora que Calico está listo)"
 retry kubectl wait --for=condition=Ready node --all --timeout=300s
 echo "::endgroup::"
 
@@ -196,13 +232,4 @@ if [ $NOT_READY -gt 0 ]; then
   echo "Pods no listos en kube-system:"
   kubectl get pods -n kube-system --field-selector=status.phase!=Running,status.phase!=Succeeded || true
 fi
-echo "::endgroup::"
-
-echo "::group::Instalando Calico"
-if ! kubectl get ns calico-system >/dev/null 2>&1; then
-  retry kubectl apply -f "${CALICO_MANIFEST_URL}"
-else
-  echo "Calico ya desplegado, omitiendo instalación"
-fi
-retry kubectl rollout status ds/calico-node -n kube-system --timeout=300s
 echo "::endgroup::"
