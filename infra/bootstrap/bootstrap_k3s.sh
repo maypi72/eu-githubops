@@ -166,7 +166,18 @@ wait_for_node_ready() {
 # Ejecución principal del bootstrap en orden correcto
 # ============================================================
 
-install_dependencies
+# Primero verificar si k3s ya está instalado
+echo "::group::Comprobando si k3s ya está instalado"
+if command -v k3s >/dev/null 2>&1; then
+  echo -e "${GREEN}✓ k3s ya está instalado: $(k3s --version)${NC}"
+  echo "::endgroup::"
+else
+  echo "k3s no está instalado, procediendo con instalación..."
+  echo "::endgroup::"
+  # Solo instalar dependencias si k3s no está presente
+  install_dependencies
+fi
+
 install_k3s
 
 # Usar el kubeconfig de K3s para todas las llamadas a kubectl del bootstrap
