@@ -1,0 +1,10 @@
+installCRDs: true
+
+prometheus:
+  enabled: false
+
+webhook:
+  timeoutSeconds: 10
+
+extraArgs:
+  - --enable-certificate-owner-ref=true
