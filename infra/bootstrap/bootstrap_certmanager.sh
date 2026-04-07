@@ -28,6 +28,25 @@ retry() {
   done
 }
 
+is_cert_manager_installed() {
+  # Verificar si el release de Helm existe
+  if ! helm list -n "$CERT_MANAGER_NAMESPACE" 2>/dev/null | grep -q "^$RELEASE_NAME\s"; then
+    return 1
+  fi
+  
+  # Verificar si los pods están ready
+  local pod_count
+  pod_count=$(kubectl get pods -n "$CERT_MANAGER_NAMESPACE" \
+    -l app.kubernetes.io/instance=cert-manager \
+    --field-selector=status.phase=Running \
+    -o jsonpath='{.items | length}' 2>/dev/null || echo "0")
+  
+  if [ "$pod_count" -gt 0 ]; then
+    return 0
+  fi
+  return 1
+}
+
 echo "::group::Comprobando KUBECONFIG"
 KUBECONFIG="${KUBECONFIG:-$HOME/kubeconfig}"
 export KUBECONFIG
@@ -56,6 +75,15 @@ for i in $(seq 1 $MAX_RETRIES); do
   echo "Intento $i/$MAX_RETRIES: esperando a que KUBECONFIG esté disponible..."
   sleep $RETRY_DELAY
 done
+echo "::endgroup::"
+
+echo "::group::Verificando si cert-manager ya está instalado"
+if is_cert_manager_installed; then
+  echo "✓ cert-manager ya está instalado y operativo en el namespace '$CERT_MANAGER_NAMESPACE'"
+  echo "::endgroup::"
+  exit 0
+fi
+echo "cert-manager no está instalado o no está completamente operativo"
 echo "::endgroup::"
 
 echo "::group::Comprobando fichero de values"
@@ -91,6 +119,6 @@ else
         --version "$CERT_MANAGER_CHART_VERSION" \
         -f "$CERT_MANAGER_VALUES"
 fi
-echo "✓ NGINX Cert-manager instalado"
+echo "✓ Cert-manager instalado"
 echo "::endgroup::"
 
