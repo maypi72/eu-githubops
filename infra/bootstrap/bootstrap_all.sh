@@ -117,6 +117,12 @@ if ! run_bootstrap "bootstrap_certmanager.sh" "$BOOTSTRAP_CERT_MANAGER"; then
   FAILED=1
   echo "::warning::Falló la instalación de cert-manager, pero bootstrap parcial completado"
 fi  
+
+#5. Instalar sealed-secrets
+if ! run_bootstrap "bootstrap_sealed_secrets.sh" "$BOOTSTRAP_SEALED_SECRETS"; then
+  FAILED=1
+  echo "::warning::Falló la instalación de sealed-secrets, pero bootstrap parcial completado"
+fi
 echo "::endgroup::"
 
 # Resumen final
