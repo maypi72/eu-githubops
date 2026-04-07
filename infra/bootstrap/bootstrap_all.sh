@@ -12,6 +12,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 BOOTSTRAP_K3S="${SCRIPT_DIR}/bootstrap_k3s.sh"
 BOOTSTRAP_HELM="${SCRIPT_DIR}/bootstrap_helm.sh"
 BOOTSTRAP_INGRESS="${SCRIPT_DIR}/bootstrap_ingress.sh"
+BOOTSTRAP_CERT_MANAGER="${SCRIPT_DIR}/bootstrap_certmanager.sh"
 
 # Variables globales
 KUBECONFIG="${KUBECONFIG:-${HOME}/kubeconfig}"
@@ -111,6 +112,11 @@ if ! run_bootstrap "bootstrap_ingress.sh" "$BOOTSTRAP_INGRESS"; then
   echo "::warning::Falló la instalación de Ingress, pero bootstrap parcial completado"
 fi
 
+#4. Instalar cert-manager
+if ! run_bootstrap "bootstrap_certmanager.sh" "$BOOTSTRAP_CERT_MANAGER"; then
+  FAILED=1
+  echo "::warning::Falló la instalación de cert-manager, pero bootstrap parcial completado"
+fi  
 echo "::endgroup::"
 
 # Resumen final
