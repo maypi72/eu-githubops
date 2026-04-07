@@ -109,7 +109,7 @@ retry helm repo update
 echo "::endgroup::" 
 
 echo "::group::Instalando cert-manager con Helm"
-if helm list -n "$CERT_MANAGER_NAMESPACE" | grep -q "^$RELEASE_NAME\s"; then
+if helm list -n "$CERT_MANAGER_NAMESPACE" | awk '{print $1}' | grep -qx "$RELEASE_NAME"; then
     echo "✓ Release '$RELEASE_NAME' ya instalada en el namespace '$CERT_MANAGER_NAMESPACE'"
 else
     echo "Instalando release '$RELEASE_NAME' en el namespace '$CERT_MANAGER_NAMESPACE'..."
