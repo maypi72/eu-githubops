@@ -30,18 +30,7 @@ retry() {
 
 is_sealed_secrets_installed() {
   # Verificar si el release de Helm existe
-  if ! helm list -n "$SEALED_SECRETS_NAMESPACE" 2>/dev/null | grep -q "^$SEALED_SECRETS_RELEASE_NAME\s"; then
-    return 1
-  fi
-  
-  # Verificar si los pods están ready
-  local pod_count
-  pod_count=$(kubectl get pods -n "$SEALED_SECRETS_NAMESPACE" \
-    -l app.kubernetes.io/name=sealed-secrets \
-    --field-selector=status.phase=Running \
-    -o jsonpath='{.items | length}' 2>/dev/null || echo "0")
-  
-  if [ "$pod_count" -gt 0 ]; then
+  if helm list -n "$SEALED_SECRETS_NAMESPACE" 2>/dev/null | grep -q "^$SEALED_SECRETS_RELEASE_NAME\s"; then
     return 0
   fi
   return 1

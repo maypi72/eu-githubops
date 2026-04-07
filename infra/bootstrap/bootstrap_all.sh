@@ -13,6 +13,7 @@ BOOTSTRAP_K3S="${SCRIPT_DIR}/bootstrap_k3s.sh"
 BOOTSTRAP_HELM="${SCRIPT_DIR}/bootstrap_helm.sh"
 BOOTSTRAP_INGRESS="${SCRIPT_DIR}/bootstrap_ingress.sh"
 BOOTSTRAP_CERT_MANAGER="${SCRIPT_DIR}/bootstrap_certmanager.sh"
+BOOTSTRAP_SEALED_SECRETS="${SCRIPT_DIR}/bootstrap_sealed_secrets.sh"
 
 # Variables globales
 KUBECONFIG="${KUBECONFIG:-${HOME}/kubeconfig}"
@@ -24,7 +25,7 @@ echo "BOOTSTRAP COMPLETO - Orquestador"
 echo "================================================"
 
 # Comprobar que todos los scripts existen
-for script in "$BOOTSTRAP_K3S" "$BOOTSTRAP_HELM" "$BOOTSTRAP_INGRESS"; do
+for script in "$BOOTSTRAP_K3S" "$BOOTSTRAP_HELM" "$BOOTSTRAP_INGRESS" "$BOOTSTRAP_CERT_MANAGER" "$BOOTSTRAP_SEALED_SECRETS"; do
   if [ ! -f "$script" ]; then
     echo "ERROR: Script no encontrado: $script"
     exit 1
