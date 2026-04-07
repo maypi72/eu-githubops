@@ -84,19 +84,24 @@ echo "::endgroup::"
 
 echo "::group::Instalando NGINX Ingress Controller"
 if helm status "$INGRESS_RELEASE" -n "$INGRESS_NAMESPACE" >/dev/null 2>&1; then
-  echo "Ingress ya instalado, ejecutando upgrade --install"
+  echo "✓ Ingress Controller ya está instalado en el namespace '$INGRESS_NAMESPACE'"
+  echo "::endgroup::"
+  
+  echo "::group::Verificando que el Ingress Controller está listo"
 else
-  echo "Ingress no instalado, procediendo a instalar"
+  echo "Ingress Controller no instalado, procediendo a instalar"
+  
+  retry helm install "$INGRESS_RELEASE" "$INGRESS_CHART" \
+    --namespace "$INGRESS_NAMESPACE" \
+    --create-namespace \
+    --atomic --wait --timeout 10m \
+    -f "$INGRESS_VALUES"
+
+  echo "✓ NGINX Ingress Controller instalado"
+  echo "::endgroup::"
+  
+  echo "::group::Verificando que el Ingress Controller está listo"
 fi
-
-retry helm upgrade --install "$INGRESS_RELEASE" "$INGRESS_CHART" \
-  --namespace "$INGRESS_NAMESPACE" \
-  --create-namespace \
-  --atomic --wait --timeout 10m \
-  -f "$INGRESS_VALUES"
-
-echo "✓ NGINX Ingress Controller instalado"
-echo "::endgroup::"
 
 echo "::group::Verificando que el Ingress Controller está listo"
 
