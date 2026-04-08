@@ -35,8 +35,10 @@ jobs:
           fetch-depth: 0
           token: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Download kubeconfig artifact
+      - name: Download kubeconfig artifact (optional)
+        id: download-artifact
         uses: actions/download-artifact@v4
+        continue-on-error: true
         with:
           name: kubeconfig
           path: ${{ runner.temp }}/kubeconfig-artifact
@@ -45,18 +47,64 @@ jobs:
         run: |
           echo "::group::Configurando kubeconfig"
           
-          KUBECONFIG_PATH="${{ runner.temp }}/kubeconfig-artifact/kubeconfig"
+          KUBECONFIG_FOUND=false
           
-          if [ -f "$KUBECONFIG_PATH" ]; then
-            echo "[✓] Artifact kubeconfig encontrado"
-            cp "$KUBECONFIG_PATH" "$KUBECONFIG"
-            chmod 600 "$KUBECONFIG"
-            echo "KUBECONFIG=$KUBECONFIG" >> $GITHUB_ENV
-            echo "[✓] KUBECONFIG configurado: $KUBECONFIG"
+          # Buscar kubeconfig en rutas locales primero (desde bootstrap-cluster.yml)
+          KUBECONFIG_PATHS=(
+            "$KUBECONFIG"
+            "/etc/rancher/k3s/k3s.yaml"
+            "$HOME/kubeconfig"
+            "$HOME/.kube/config"
+          )
+          
+          echo "Buscando KUBECONFIG en rutas locales..."
+          for kb_path in "${KUBECONFIG_PATHS[@]}"; do
+            if [ -f "$kb_path" ]; then
+              echo "[✓] KUBECONFIG encontrado localmente: $kb_path"
+              
+              # Asegurar que KUBECONFIG apunta al archivo correcto
+              export KUBECONFIG="$kb_path"
+              echo "KUBECONFIG=$KUBECONFIG" >> $GITHUB_ENV
+              
+              KUBECONFIG_FOUND=true
+              break
+            fi
+          done
+          
+          # Si no se encuentra localmente, intentar usar artefacto descargado
+          if [ "$KUBECONFIG_FOUND" = false ]; then
+            echo "[!] KUBECONFIG no encontrado localmente"
+            
+            if [ "${{ steps.download-artifact.outcome }}" = "success" ] && [ -f "${{ runner.temp }}/kubeconfig-artifact/kubeconfig" ]; then
+              echo "[✓] Usando artefacto descargado de bootstrap-cluster"
+              cp "${{ runner.temp }}/kubeconfig-artifact/kubeconfig" "$KUBECONFIG"
+              chmod 600 "$KUBECONFIG"
+              echo "KUBECONFIG=$KUBECONFIG" >> $GITHUB_ENV
+              echo "[✓] KUBECONFIG configurado desde artefacto: $KUBECONFIG"
+              KUBECONFIG_FOUND=true
+            else
+              echo "[✗] Artefacto no disponible (expirado o no existe)"
+              echo ""
+              echo "Por favor:"
+              echo "  1. Ejecuta el workflow 'bootstrap-cluster.yml' para generar nuevo artefacto"
+              echo "  2. O asegúrate que k3s está instalado en /etc/rancher/k3s/k3s.yaml"
+              echo "  3. O define KUBECONFIG en \$HOME/kubeconfig"
+              exit 1
+            fi
+          fi
+          
+          # Verificar que KUBECONFIG es accesible
+          if [ -f "$KUBECONFIG" ]; then
+            echo "[✓] KUBECONFIG validado: $(ls -lh $KUBECONFIG | awk '{print $5, $9}')"
+            echo "[✓] Conectando al cluster..."
+            if kubectl cluster-info &>/dev/null; then
+              echo "[✓] Conexión al cluster OK"
+            else
+              echo "[✗] No se puede conectar al cluster"
+              exit 1
+            fi
           else
-            echo "[✗] Artifact kubeconfig no encontrado en: $KUBECONFIG_PATH"
-            echo "Archivos disponibles:"
-            ls -la "${{ runner.temp }}/kubeconfig-artifact/" || echo "  Directorio no existe"
+            echo "[✗] ERROR: KUBECONFIG no es accesible en $KUBECONFIG"
             exit 1
           fi
           
