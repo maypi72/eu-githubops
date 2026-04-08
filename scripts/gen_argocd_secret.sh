@@ -6,7 +6,14 @@ NAMESPACE="argocd"
 SECRET_NAME="argocd-secret"
 OUT_DIR="infra/argocd/sealed-secrets"
 
-mkdir -p "${OUT_DIR}"
+echo "::group::Comprobando directorio de salida"
+if [ ! -d "${OUT_DIR}" ]; then
+  mkdir -p "${OUT_DIR}"
+  echo "✓ Directorio creado: ${OUT_DIR}"
+else
+  echo "✓ Directorio ya existe: ${OUT_DIR}"
+fi
+echo "::endgroup::"
 
 echo "::group::Validando variables de entorno"
 if [ -z "${ARGOCD_ADMIN_PASSWORD:-}" ]; then
