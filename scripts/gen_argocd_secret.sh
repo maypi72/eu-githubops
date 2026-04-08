@@ -5,29 +5,16 @@ IFS=$'\n\t'
 NAMESPACE="argocd"
 SECRET_NAME="argocd-secret"
 OUT_DIR="infra/argocd/sealed-secrets"
+CERT_PATH="infra/sealed-secrets/pub-cert.pem"
 
-# Configurar KUBECONFIG (ya debe estar configurado por el workflow)
-KUBECONFIG="${KUBECONFIG:-${HOME}/kubeconfig}"
-export KUBECONFIG
+echo "::group::Verificando configuración"
 
-echo "::group::Verificando configuración de Kubernetes"
-
-# Verificar que KUBECONFIG existe
-if [ ! -f "$KUBECONFIG" ]; then
-  echo "ERROR: KUBECONFIG no encontrado en $KUBECONFIG"
-  echo "Asegúrate que el artifact kubeconfig se ha descargado correctamente"
+# Verificar que la clave pública existe
+if [ ! -f "$CERT_PATH" ]; then
+  echo "ERROR: Certificado público no encontrado en $CERT_PATH"
   exit 1
 fi
-echo "✓ KUBECONFIG: $KUBECONFIG"
-
-# Verificar conectividad con el cluster
-if ! kubectl cluster-info &>/dev/null; then
-  echo "ERROR: No se puede conectar al cluster"
-  echo "Diagnosis:"
-  kubectl cluster-info
-  exit 1
-fi
-echo "✓ Cluster accesible"
+echo "✓ Certificado público: $CERT_PATH"
 echo "::endgroup::"
 
 echo "::group::Comprobando directorio de salida"
@@ -80,12 +67,6 @@ if ! command -v kubeseal &> /dev/null; then
 fi
 echo "✓ kubeseal disponible"
 
-echo ""
-echo "Verificando que kubeseal puede acceder al controller..."
-if ! kubeseal --kubeconfig "$KUBECONFIG" --print-sealed-secret < /dev/null &>/dev/null; then
-  echo "[!] kubeseal conectando al controller: $(kubeseal --kubeconfig "$KUBECONFIG" --print-sealed-secret < /dev/null 2>&1 || true)"
-fi
-
 echo "::endgroup::"
 
 echo "::group::Generando hash bcrypt"
@@ -108,12 +89,11 @@ EOF
 echo "✓ Secret creado en ${OUT_DIR}/${SECRET_NAME}.raw.yaml"
 echo "::endgroup::"
 
-echo "::group::Sellando Secret con kubeseal"
+echo "::group::Sellando Secret con kubeseal (usando clave pública)"
 kubeseal \
-  --kubeconfig "$KUBECONFIG" \
+  --cert "$CERT_PATH" \
   --format yaml \
-  --controller-namespace kube-system \
-  --controller-name sealed-secrets-controller \
+  --scope strict \
   < "${OUT_DIR}/${SECRET_NAME}.raw.yaml" \
   > "${OUT_DIR}/${SECRET_NAME}.yaml"
 echo "✓ Secret sellado en ${OUT_DIR}/${SECRET_NAME}.yaml"
