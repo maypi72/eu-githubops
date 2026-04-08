@@ -5,9 +5,10 @@ global:
   domain: argocd.local
 
 configs:
-  # No crear el secret por defecto, usaremos el secret sellado desde sealed-secrets
+  # Permitir que ArgoCD cree el secret inicial
+  # Luego se reemplaza con el secreto sellado desde sealed-secrets
   secret:
-    createSecret: false
+    createSecret: true
   params:
     server.insecure: true
 

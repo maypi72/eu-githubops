@@ -217,19 +217,36 @@ jobs:
           echo "::endgroup::"
 
       - name: Apply Sealed Secret
-        if: success() && inputs.apply_sealed_secret
+        if: success()
         run: |
           echo "::group::Aplicando secreto sellado de ArgoCD"
           
           export KUBECONFIG
           
           SEALED_SECRET_FILE="infra/argocd/sealed-secrets/argocd-secret.yaml"
+          SHOULD_APPLY="${{ inputs.apply_sealed_secret }}"
+          
+          if [ "$SHOULD_APPLY" != "false" ]; then
+            echo "apply_sealed_secret está habilitado (default: true)"
+          else
+            echo "[!] apply_sealed_secret está deshabilitado, skipping..."
+            echo "::endgroup::"
+            exit 0
+          fi
           
           if [ -f "$SEALED_SECRET_FILE" ]; then
             echo "[✓] Archivo de secreto sellado encontrado: $SEALED_SECRET_FILE"
+            echo ""
             
+            # Verificar que sealed-secrets controller esté running
+            if ! kubectl get pods -n kube-system -l app.kubernetes.io/name=sealed-secrets --no-headers 2>/dev/null | grep -q "Running"; then
+              echo "[!] Advertencia: sealed-secrets controller no está running"
+              echo "    El secreto sellado podría no desellarse correctamente"
+            fi
+            
+            echo "Aplicando secreto sellado..."
             if kubectl apply -f "$SEALED_SECRET_FILE"; then
-              echo "[✓] Secreto sellado aplicado exitosamente"
+              echo "[✓] SealedSecret aplicado exitosamente"
             else
               echo "[✗] Error aplicando el secreto sellado"
               exit 1
@@ -237,26 +254,69 @@ jobs:
             
             # Esperar a que el secreto sea desellado
             echo ""
-            echo "Esperando a que el secreto sea desellado por sealed-secrets..."
-            sleep 5
+            echo "Esperando a que sealed-secrets deseselle el secreto (máx 30 segundos)..."
             
-            if kubectl get secret argocd-secret -n argocd &>/dev/null; then
-              echo "[✓] Secreto desellado correctamente"
+            RETRY_COUNT=0
+            MAX_RETRIES=30
+            while [ $RETRY_COUNT -lt $MAX_RETRIES ]; do
+              if kubectl get secret argocd-secret -n argocd &>/dev/null; then
+                echo "[✓] Secreto desellado exitosamente"
+                break
+              fi
               
-              # Reiniciar los pods de ArgoCD para que usen el nuevo secreto
-              echo ""
-              echo "Recargando ArgoCD para usar el nuevo secreto..."
-              kubectl rollout restart deployment/argocd-server -n argocd
-              kubectl rollout restart deployment/argocd-application-controller -n argocd
-              echo "[✓] Pods de ArgoCD recargados"
-            else
-              echo "[✗] El secreto no fue desellado correctamente"
+              RETRY_COUNT=$((RETRY_COUNT + 1))
+              if [ $RETRY_COUNT -lt $MAX_RETRIES ]; then
+                echo "  Intento $RETRY_COUNT/$MAX_RETRIES..."
+                sleep 1
+              fi
+            done
+            
+            if [ $RETRY_COUNT -ge $MAX_RETRIES ]; then
+              echo "[✗] El secreto no fue desellado dentro del tiempo límite"
+              echo "    Verifica los logs del sealed-secrets controller:"
+              echo "    kubectl logs -n kube-system -l app.kubernetes.io/name=sealed-secrets"
               exit 1
             fi
+            
+            # Reiniciar los pods de ArgoCD para que usen el nuevo secreto
+            echo ""
+            echo "Recargando los pods de ArgoCD para usar el nuevo secreto..."
+            
+            DEPLOYMENTS=(
+              "argocd-server"
+              "argocd-application-controller"
+              "argocd-repo-server"
+              "argocd-applicationset-controller"
+              "argocd-notifications-controller"
+            )
+            
+            for deployment in "${DEPLOYMENTS[@]}"; do
+              if kubectl get deployment "$deployment" -n argocd &>/dev/null; then
+                echo "  • Recargando $deployment..."
+                kubectl rollout restart deployment/"$deployment" -n argocd
+              fi
+            done
+            
+            echo ""
+            echo "Esperando a que los pods estén listos..."
+            sleep 5
+            
+            echo "[✓] Pods de ArgoCD recargados"
+            echo ""
+            echo "Estado actual de los pods:"
+            kubectl get pods -n argocd -l app.kubernetes.io/instance=argocd
+            
           else
             echo "[!] Archivo de secreto sellado NO encontrado: $SEALED_SECRET_FILE"
-            echo "    Skipping sealed secret application"
-            echo "    Nota: Genera el secreto con el workflow 'Generate ArgoCD Secret'"
+            echo ""
+            echo "Esto es normal en la primera ejecución."
+            echo "Pasos para aplicar el secreto:"
+            echo "  1. Ejecuta el workflow 'gen-argocd-secret.yaml'"
+            echo "  2. Esto generará y sellará la contraseña de admin"
+            echo "  3. El secreto se committeará a Git"
+            echo "  4. En la siguiente ejecución de este workflow se aplicará automáticamente"
+            echo ""
+            echo "Por ahora, ArgoCD usando la contraseña por defecto."
           fi
           
           echo "::endgroup::"
