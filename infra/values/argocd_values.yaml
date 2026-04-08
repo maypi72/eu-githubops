@@ -1,0 +1,65 @@
+# Valores orientados a laboratorio en K3s.
+# Se prioriza simplicidad y bajo consumo de recursos.
+
+global:
+  domain: argocd.local
+
+configs:
+  # No crear el secret por defecto, usaremos el secret sellado desde sealed-secrets
+  secret:
+    createSecret: false
+  params:
+    server.insecure: true
+
+dex:
+  enabled: false
+
+redis:
+  enabled: true
+
+controller:
+  replicas: 1
+  parallelismLimit: 3
+  resources:
+    requests:
+      cpu: 150m
+      memory: 250Mi
+    limits:
+      cpu: 500m
+      memory: 760Mi
+
+server:
+  replicas: 1
+  resources:
+    requests:
+      cpu: 50m
+      memory: 128Mi
+    limits:
+      cpu: 300m
+      memory: 256Mi
+  service:
+    type: ClusterIP
+  ingress:
+    enabled: true
+    ingressClassName: nginx
+    hosts:
+      - argocd.local
+    paths:
+      - /
+    pathType: Prefix
+
+repoServer:
+  replicas: 1
+  resources:
+    requests:
+      cpu: 150m
+      memory: 256Mi
+    limits:
+      cpu: 500m
+      memory: 512Mi
+
+applicationSet:
+  replicas: 1
+
+notifications:
+  enabled: false
