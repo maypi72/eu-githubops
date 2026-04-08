@@ -6,13 +6,16 @@ NAMESPACE="argocd"
 SECRET_NAME="argocd-secret"
 OUT_DIR="infra/argocd/sealed-secrets"
 
-# Configurar KUBECONFIG
+# Configurar KUBECONFIG (ya debe estar configurado por el workflow)
 KUBECONFIG="${KUBECONFIG:-${HOME}/kubeconfig}"
 export KUBECONFIG
 
 echo "::group::Verificando configuración de Kubernetes"
+
+# Verificar que KUBECONFIG existe
 if [ ! -f "$KUBECONFIG" ]; then
   echo "ERROR: KUBECONFIG no encontrado en $KUBECONFIG"
+  echo "Asegúrate que el artifact kubeconfig se ha descargado correctamente"
   exit 1
 fi
 echo "✓ KUBECONFIG: $KUBECONFIG"
@@ -20,7 +23,8 @@ echo "✓ KUBECONFIG: $KUBECONFIG"
 # Verificar conectividad con el cluster
 if ! kubectl cluster-info &>/dev/null; then
   echo "ERROR: No se puede conectar al cluster"
-  echo "Verificar KUBECONFIG y cluster status"
+  echo "Diagnosis:"
+  kubectl cluster-info
   exit 1
 fi
 echo "✓ Cluster accesible"
