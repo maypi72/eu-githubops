@@ -6,6 +6,26 @@ NAMESPACE="argocd"
 SECRET_NAME="argocd-secret"
 OUT_DIR="infra/argocd/sealed-secrets"
 
+# Configurar KUBECONFIG
+KUBECONFIG="${KUBECONFIG:-${HOME}/kubeconfig}"
+export KUBECONFIG
+
+echo "::group::Verificando configuración de Kubernetes"
+if [ ! -f "$KUBECONFIG" ]; then
+  echo "ERROR: KUBECONFIG no encontrado en $KUBECONFIG"
+  exit 1
+fi
+echo "✓ KUBECONFIG: $KUBECONFIG"
+
+# Verificar conectividad con el cluster
+if ! kubectl cluster-info &>/dev/null; then
+  echo "ERROR: No se puede conectar al cluster"
+  echo "Verificar KUBECONFIG y cluster status"
+  exit 1
+fi
+echo "✓ Cluster accesible"
+echo "::endgroup::"
+
 echo "::group::Comprobando directorio de salida"
 if [ ! -d "${OUT_DIR}" ]; then
   mkdir -p "${OUT_DIR}"
@@ -56,6 +76,12 @@ if ! command -v kubeseal &> /dev/null; then
 fi
 echo "✓ kubeseal disponible"
 
+echo ""
+echo "Verificando que kubeseal puede acceder al controller..."
+if ! kubeseal --kubeconfig "$KUBECONFIG" --print-sealed-secret < /dev/null &>/dev/null; then
+  echo "[!] kubeseal conectando al controller: $(kubeseal --kubeconfig "$KUBECONFIG" --print-sealed-secret < /dev/null 2>&1 || true)"
+fi
+
 echo "::endgroup::"
 
 echo "::group::Generando hash bcrypt"
@@ -80,6 +106,7 @@ echo "::endgroup::"
 
 echo "::group::Sellando Secret con kubeseal"
 kubeseal \
+  --kubeconfig "$KUBECONFIG" \
   --format yaml \
   --controller-namespace kube-system \
   --controller-name sealed-secrets-controller \
