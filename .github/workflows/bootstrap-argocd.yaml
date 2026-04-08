@@ -1,0 +1,323 @@
+name: Bootstrap ArgoCD
+
+on:
+  workflow_dispatch:
+    inputs:
+      apply_sealed_secret:
+        description: 'Aplicar el secreto sellado después de instalar ArgoCD'
+        required: false
+        default: true
+        type: boolean
+
+permissions:
+  contents: read
+  id-token: write
+  actions: read
+
+env:
+  KUBECONFIG: $HOME/kubeconfig
+  RETRY_MAX: 5
+  RETRY_DELAY: 2
+  ARTIFACT_DIR: $HOME/bootstrap-artifacts
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
+jobs:
+  bootstrap-argocd:
+    name: Bootstrap ArgoCD
+    runs-on: [self-hosted, linux]
+    timeout-minutes: 15
+    environment: lab
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Download kubeconfig artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: kubeconfig
+          path: ${{ runner.temp }}/kubeconfig-artifact
+
+      - name: Setup kubeconfig
+        run: |
+          echo "::group::Configurando kubeconfig"
+          
+          KUBECONFIG_PATH="${{ runner.temp }}/kubeconfig-artifact/kubeconfig"
+          
+          if [ -f "$KUBECONFIG_PATH" ]; then
+            echo "[✓] Artifact kubeconfig encontrado"
+            cp "$KUBECONFIG_PATH" "$KUBECONFIG"
+            chmod 600 "$KUBECONFIG"
+            echo "KUBECONFIG=$KUBECONFIG" >> $GITHUB_ENV
+            echo "[✓] KUBECONFIG configurado: $KUBECONFIG"
+          else
+            echo "[✗] Artifact kubeconfig no encontrado en: $KUBECONFIG_PATH"
+            echo "Archivos disponibles:"
+            ls -la "${{ runner.temp }}/kubeconfig-artifact/" || echo "  Directorio no existe"
+            exit 1
+          fi
+          
+          echo "::endgroup::"
+
+      - name: Prepare Bootstrap Environment
+        run: |
+          echo "::group::Preparando entorno de bootstrap"
+          
+          # Crear directorio de artefactos
+          mkdir -p $ARTIFACT_DIR
+          
+          # Validar scripts de bootstrap
+          required_files=(
+            "infra/bootstrap/bootstrap_argocd.sh"
+          )
+          
+          for file in "${required_files[@]}"; do
+            if [ -f "$file" ]; then
+              echo "[✓] $file encontrado"
+              if [ ! -x "$file" ]; then
+                chmod +x "$file"
+                echo "  [✓] Permisos ejecutables otorgados"
+              fi
+            else
+              echo "[✗] ERROR: $file no encontrado"
+              exit 1
+            fi
+          done
+          
+          echo "[✓] Archivos validados"
+          
+          echo "::endgroup::"
+
+      - name: System Information
+        run: |
+          echo "::group::Información del sistema"
+          echo "OS: $(uname -s)"
+          echo "Kernel: $(uname -r)"
+          echo "Arquitectura: $(uname -m)"
+          echo "::endgroup::"
+
+      - name: Check Prerequisites
+        run: |
+          echo "::group::Verificación de herramientas"
+          
+          tools=("kubectl" "helm")
+          for tool in "${tools[@]}"; do
+            if command -v "$tool" >/dev/null 2>&1; then
+              version=$($tool version --short 2>&1 | head -1 || $tool --version 2>&1 | head -1)
+              echo "[✓] $tool: $version"
+            else
+              echo "[✗] ERROR: $tool no está instalado"
+              exit 1
+            fi
+          done
+          
+          echo "::endgroup::"
+
+      - name: Execute Bootstrap ArgoCD
+        id: bootstrap-argocd
+        run: |
+          echo "::group::Ejecutando bootstrap de ArgoCD"
+          
+          export KUBECONFIG
+          
+          if bash infra/bootstrap/bootstrap_argocd.sh; then
+            echo "exit_code=0" >> $GITHUB_OUTPUT
+            echo "[✓] Bootstrap de ArgoCD completado exitosamente"
+          else
+            echo "exit_code=1" >> $GITHUB_OUTPUT
+            echo "[✗] Bootstrap de ArgoCD falló"
+            exit 1
+          fi
+          
+          echo "::endgroup::"
+
+      - name: Verify ArgoCD Installation
+        if: success()
+        run: |
+          echo "::group::Verificando instalación de ArgoCD"
+          
+          export KUBECONFIG
+          
+          # Verificar que el namespace existe
+          if kubectl get namespace argocd &>/dev/null; then
+            echo "[✓] Namespace 'argocd' existe"
+          else
+            echo "[✗] Namespace 'argocd' no encontrado"
+            exit 1
+          fi
+          
+          # Verificar Helm release
+          if helm list -n argocd | grep -q "^argocd"; then
+            echo "[✓] Release Helm 'argocd' instalado"
+            helm status argocd -n argocd
+          else
+            echo "[✗] Release Helm 'argocd' no encontrado"
+            exit 1
+          fi
+          
+          # Verificar pods
+          echo ""
+          echo "Estado de los pods de ArgoCD:"
+          kubectl get pods -n argocd
+          
+          echo ""
+          echo "[✓] Verificación completada"
+          
+          echo "::endgroup::"
+
+      - name: Apply Sealed Secret
+        if: success() && inputs.apply_sealed_secret
+        run: |
+          echo "::group::Aplicando secreto sellado de ArgoCD"
+          
+          export KUBECONFIG
+          
+          SEALED_SECRET_FILE="infra/argocd/sealed-secrets/argocd-secret.yaml"
+          
+          if [ -f "$SEALED_SECRET_FILE" ]; then
+            echo "[✓] Archivo de secreto sellado encontrado: $SEALED_SECRET_FILE"
+            
+            if kubectl apply -f "$SEALED_SECRET_FILE"; then
+              echo "[✓] Secreto sellado aplicado exitosamente"
+            else
+              echo "[✗] Error aplicando el secreto sellado"
+              exit 1
+            fi
+            
+            # Esperar a que el secreto sea desellado
+            echo ""
+            echo "Esperando a que el secreto sea desellado por sealed-secrets..."
+            sleep 5
+            
+            if kubectl get secret argocd-secret -n argocd &>/dev/null; then
+              echo "[✓] Secreto desellado correctamente"
+              
+              # Reiniciar los pods de ArgoCD para que usen el nuevo secreto
+              echo ""
+              echo "Recargando ArgoCD para usar el nuevo secreto..."
+              kubectl rollout restart deployment/argocd-server -n argocd
+              kubectl rollout restart deployment/argocd-application-controller -n argocd
+              echo "[✓] Pods de ArgoCD recargados"
+            else
+              echo "[✗] El secreto no fue desellado correctamente"
+              exit 1
+            fi
+          else
+            echo "[!] Archivo de secreto sellado NO encontrado: $SEALED_SECRET_FILE"
+            echo "    Skipping sealed secret application"
+            echo "    Nota: Genera el secreto con el workflow 'Generate ArgoCD Secret'"
+          fi
+          
+          echo "::endgroup::"
+
+      - name: Generate Bootstrap Report
+        if: always()
+        run: |
+          echo "::group::Generando reporte de bootstrap"
+          
+          report_file="$ARTIFACT_DIR/bootstrap-argocd-report.txt"
+          
+          {
+            echo "╔════════════════════════════════════════════════════════╗"
+            echo "║         REPORTE DE BOOTSTRAP ARGOCD                   ║"
+            echo "╚════════════════════════════════════════════════════════╝"
+            echo ""
+            echo "Fecha: $(date)"
+            echo "Timestamp: $(date +%s)"
+            echo ""
+            
+            if [ "${{ steps.bootstrap-argocd.outputs.exit_code }}" -eq 0 ]; then
+              echo "Estado: ✓ EXITOSO"
+            else
+              echo "Estado: ✗ FALLÓ"
+            fi
+            
+            echo ""
+            echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+            echo "Información de ArgoCD:"
+            echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+            echo ""
+            
+            export KUBECONFIG
+            if command -v kubectl &>/dev/null && [ -f "$KUBECONFIG" ]; then
+              echo "Namespace: argocd"
+              echo ""
+              echo "Releases Helm:"
+              helm list -n argocd 2>/dev/null || echo "N/A"
+              echo ""
+              echo "Pods:"
+              kubectl get pods -n argocd 2>/dev/null || echo "N/A"
+              echo ""
+              echo "Servicios:"
+              kubectl get svc -n argocd 2>/dev/null || echo "N/A"
+              echo ""
+              echo "Secrets:"
+              kubectl get secrets -n argocd 2>/dev/null || echo "N/A"
+            else
+              echo "No se pudo obtener información del cluster (kubectl no disponible)"
+            fi
+            
+            echo ""
+            echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+            echo "Próximos pasos:"
+            echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+            echo ""
+            echo "1. Acceder a ArgoCD:"
+            echo "   kubectl port-forward svc/argocd-server -n argocd 8080:443"
+            echo ""
+            echo "2. Obtener la contraseña de admin:"
+            echo "   kubectl -n argocd get secret argocd-secret -o jsonpath=\"{.data.admin\.password}\" | base64 -d"
+            echo ""
+            echo "3. Abrir en navegador:"
+            echo "   https://argocd.local:8080"
+            echo ""
+            
+          } > "$report_file"
+          
+          cat "$report_file"
+          echo "::endgroup::"
+
+      - name: Upload Bootstrap Report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: bootstrap-argocd-report
+          path: ${{ env.ARTIFACT_DIR }}/bootstrap-argocd-report.txt
+          retention-days: 30
+          compression-level: 9
+
+      - name: Cleanup on Failure
+        if: failure()
+        run: |
+          echo "::group::Información de debugging"
+          echo "[!] Bootstrap de ArgoCD falló"
+          echo ""
+          echo "Revisa los logs anteriores para detalles del error"
+          echo ""
+          echo "Para debugging, puedes ejecutar localmente:"
+          echo "  export KUBECONFIG=<ruta-a-kubeconfig>"
+          echo "  bash infra/bootstrap/bootstrap_argocd.sh"
+          echo "::endgroup::"
+
+      - name: Success Summary
+        if: success()
+        run: |
+          echo "::group::Resumen de éxito"
+          echo ""
+          echo "✓ Bootstrap de ArgoCD completado exitosamente"
+          echo ""
+          echo "Información útil:"
+          echo "  - Reporte disponible en artifacts: bootstrap-argocd-report"
+          echo "  - Namespace: argocd"
+          echo "  - Domain: argocd.local"
+          echo ""
+          echo "Para acceder a ArgoCD:"
+          echo "  1. Port-forward: kubectl port-forward svc/argocd-server -n argocd 8080:443"
+          echo "  2. Abre: https://localhost:8080"
+          echo "  3. Usuario: admin"
+          echo "  4. Contraseña: (desde el secret argocd-secret)"
+          echo ""
+          echo "::endgroup::"
