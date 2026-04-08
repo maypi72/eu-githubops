@@ -33,15 +33,26 @@ echo "✓ htpasswd disponible"
 
 if ! command -v yq &> /dev/null; then
   echo "[!] yq no encontrado. Instalando..."
-  curl -sL https://github.com/mikefarah/yq/releases/latest/download/yq_linux_amd64 -o /usr/local/bin/yq
-  chmod +x /usr/local/bin/yq
+  if ! sudo curl -fsSL https://github.com/mikefarah/yq/releases/latest/download/yq_linux_amd64 -o /usr/local/bin/yq; then
+    echo "ERROR: No se pudo descargar yq"
+    exit 1
+  fi
+  sudo chmod +x /usr/local/bin/yq
 fi
 echo "✓ yq disponible"
 
 if ! command -v kubeseal &> /dev/null; then
   echo "[!] kubeseal no encontrado. Instalando..."
-  wget -q https://github.com/bitnami-labs/sealed-secrets/releases/download/v0.24.0/kubeseal-0.24.0-linux-amd64.tar.gz -O - | tar xfz - -C /usr/local/bin
-  chmod +x /usr/local/bin/kubeseal
+  KUBESEAL_TMP=$(mktemp -d)
+  trap "rm -rf $KUBESEAL_TMP" EXIT
+  if ! wget -qO - https://github.com/bitnami-labs/sealed-secrets/releases/download/v0.24.0/kubeseal-0.24.0-linux-amd64.tar.gz | tar xfz - -C "$KUBESEAL_TMP"; then
+    echo "ERROR: No se pudo descargar e instalar kubeseal"
+    exit 1
+  fi
+  if ! sudo mv "$KUBESEAL_TMP/kubeseal" /usr/local/bin/ || ! sudo chmod +x /usr/local/bin/kubeseal; then
+    echo "ERROR: No se pudo mover kubeseal a /usr/local/bin"
+    exit 1
+  fi
 fi
 echo "✓ kubeseal disponible"
 
