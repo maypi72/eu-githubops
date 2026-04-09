@@ -5,10 +5,17 @@
 global:
   domain: argocd.local
 
-# Configuración de componentes
+#Configuración principal
+configs:
+  cm:
+    # url canónica ya que tenemos ingress + TLS
+    url: https://argocd.local
+    admin.enabled: true
+
+# Parámetros específicos del servidor ArgoCD
 configuration:
   params:
-    server.insecure: true
+    #server.insecure: true
     server.disable.auth: false
     application.instanceLabelKey: argocd.argoproj.io/instance
 
@@ -46,6 +53,7 @@ server:
     ingressClassName: nginx
     annotations:
       cert-manager.io/cluster-issuer: "mygitops-ca"
+      nginx.ingress.kubernetes.io/backend-protocol: "HTTPS"
     hosts:
       - argocd.local
     paths:
