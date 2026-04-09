@@ -1,17 +1,26 @@
-# Guía: Aplicar Root Application de ArgoCD
+# Guía: Aplicar Root Platform (Project + Application de ArgoCD)
 
 ## Descripción
 
-La **Root Application** es el punto de entrada para que **ArgoCD** gestione toda la plataforma. Una vez aplicada, ArgoCD sincronizará automáticamente todos los componentes y aplicaciones definidas en el repositorio.
+La **Root Platform** es el punto de entrada completo para que **ArgoCD** gestione toda la plataforma. Consiste en:
+
+1. **ArgoCD Project** (`platfrom_proyect.yaml`): Define el proyecto y permisos para ArgoCD
+2. **Root Application** (`root-platform.yaml`): La aplicación raíz que sincroniza todo
+
+Una vez aplicados, ArgoCD sincronizará automáticamente todos los componentes y aplicaciones definidas en el repositorio.
+
+**Orden de aplicación**: Primero Project, luego Root Application
 
 ## Requisitos
 
-Antes de aplicar la Root Application, debes haber completado:
+Antes de aplicar la Root Platform, debes haber completado:
 
 1. ✓ **Cluster Kubernetes**: k3s instalado y funcionando
 2. ✓ **Helm**: Instalado en el cluster
 3. ✓ **ArgoCD**: Instalado en el namespace `argocd` (ejecutar `bootstrap-argocd.yml`)
-4. ✓ **Archivo**: `platform/root-application.yaml` debe existir en el repositorio
+4. ✓ **Archivos**: 
+   - `argocd-proyects/platfrom_proyect.yaml` debe existir
+   - `platform/root-platform.yaml` debe existir
 
 ## Métodos de Aplicación
 
@@ -23,8 +32,8 @@ Si tienes acceso directo al cluster con `kubectl` configurado:
 # Navega al directorio raíz del repositorio
 cd /path/to/eu-githubops
 
-# Executa el script
-./scripts/gen_root_app.sh
+# Ejecuta el script (aplica primero Project, luego Root Application)
+./scripts/gen_root_plat.sh
 ```
 
 **Lo que hace el script:**
@@ -33,37 +42,41 @@ cd /path/to/eu-githubops
 - ✓ Verifica que el cluster es accesible
 - ✓ Comprueba que el namespace `argocd` existe
 - ✓ Comprueba que ArgoCD está instalado
-- ✓ Valida que el archivo YAML existe
-- ✓ Comprueba si la Application ya existe
-- ⚠️ **Si ya existe**: te pide confirmación antes de actualizar
-- ✓ Aplica el archivo YAML
-- ✓ Espera a que ArgoCD registre la Application
+- ✓ Valida que ambos archivos YAML existen:
+  - `argocd-proyects/platfrom_proyect.yaml`
+  - `platform/root-platform.yaml`
+- ✓ **Primero**: Aplica el ArgoCD Project
+- ✓ **Luego**: Aplica la Root Application
+- ✓ Comprueba si ya existen
+- ⚠️ **Si ya existen**: te pide confirmación antes de actualizar
+- ✓ Espera a que se registren en ArgoCD
 - ✓ Muestra estado e instrucciones para monitoreo
 
 **Ejemplo de ejecución exitosa:**
 
 ```
 [INFO] ====================================================
-[INFO] Aplicar Root Application de ArgoCD
+[INFO] Aplicar Root Platform (Project + Application)
 [INFO] ====================================================
 [✓] kubectl disponible
 [✓] KUBECONFIG encontrado: /etc/rancher/k3s/k3s.yaml
 [✓] Cluster Kubernetes accesible
 [✓] Namespace 'argocd' existe
 [✓] ArgoCD está instalado en 'argocd'
-[✓] Archivo encontrado: platform/root-application.yaml
-[INFO] Aplicando: platform/root-application.yaml
-[✓] Root Application aplicado correctamente
+[✓] Archivo encontrado: argocd-proyects/platfrom_proyect.yaml
+[✓] Archivo encontrado: platform/root-platform.yaml
 ...
+[✓] ArgoCD Project aplicado correctamente
+[✓] Root Application aplicado correctamente
 ```
 
 ### Opción 2: Usar el Workflow de GitHub Actions
 
 Si el cluster está configurado como `self-hosted` runner en GitHub:
 
-1. **Ir a**: `Actions` > `Apply Root Application` > `Run workflow`
+1. **Ir a**: `Actions` > `Apply Root Platform` > `Run workflow`
 2. **Configurar opciones** (opcional):
-   - `force_update`: Actualizar incluso si ya existe (default: `false`)
+   - `force_update`: Actualizar incluso si ya existen (default: `false`)
    - `verify_only`: Solo hacer dry-run sin aplicar (default: `false`)
 3. **Hacer clic**: ▶️ `Run workflow`
 
@@ -71,16 +84,41 @@ Si el cluster está configurado como `self-hosted` runner en GitHub:
 - Descarga el repositorio
 - Busca `kubeconfig` automáticamente
 - Valida todos los prerrequisitos
-- Valida la sintaxis YAML
-- Comprueba si la Application existe
-- Aplica el YAML (o salta si ya existe, a menos que `force_update=true`)
-- Verifica el despliegue
+- Valida la sintaxis YAML de ambos archivos
+- Comprueba si Project y Application existen
+- Aplica el Project primero (o salta si existe, a menos que `force_update=true`)
+- Aplica la Root Application (o salta si existe, a menos que `force_update=true`)
+- Verifica los despliegues
 - Proporciona instrucciones de monitoreo
 - En caso de error: genera diagnóstico detallado
 
-## Contenido del Archivo YAML
+## Contenido de los Archivos YAML
 
-La Root Application típicamente contiene:
+### 1. ArgoCD Project (`argocd-proyects/platfrom_proyect.yaml`)
+
+Define el proyecto de ArgoCD y sus permisos:
+
+```yaml
+apiVersion: argoproj.io/v1alpha1
+kind: AppProject
+metadata:
+  name: platform-project
+  namespace: argocd
+spec:
+  description: Platform Project
+  sourceNamespaces:
+    - argocd
+  destinations:
+    - namespace: '*'
+      server: '*'
+  clusterResourceWhitelist:
+    - group: '*'
+      kind: '*'
+```
+
+### 2. Root Application (`platform/root-platform.yaml`)
+
+La aplicación raíz que sincroniza todo:
 
 ```yaml
 apiVersion: argoproj.io/v1alpha1
@@ -89,11 +127,11 @@ metadata:
   name: platform-root
   namespace: argocd
 spec:
-  project: default
+  project: platform-project  # Referencia al project anterior
   source:
     repoURL: https://github.com/upcdevops/eu-githubops
     targetRevision: main
-    path: platform/  # o la ruta donde están las aplicaciones
+    path: platform/
   destination:
     server: https://kubernetes.default.svc
     namespace: default
@@ -103,12 +141,20 @@ spec:
       selfHeal: true
 ```
 
+**Nota**: El orden es importante. El Project debe existir antes que la Application que lo referencia.
+
 ## Después de Aplicar
 
 ### Monitorear la Sincronización
 
 ```bash
-# Ver estado en tiempo real
+# Ver estado del Project
+kubectl get appproject -n argocd
+
+# Ver detalles del Project
+kubectl describe appproject platform-project -n argocd
+
+# Ver estado en tiempo real de la Application
 kubectl get application platform-root -n argocd -w
 
 # Ver detalles de la Application
@@ -134,9 +180,9 @@ kubectl port-forward -n argocd svc/argocd-server 8080:443
 
 ## Solución de Problemas
 
-### La Application ya existe
+### Project o Application ya existen
 
-**Problema**: El script dice que la Application ya existe
+**Problema**: El script dice que Project/Application ya existe
 
 **Solución**:
 - Opción 1: Ejecutar nuevamente y responder `s` para actualizar
@@ -144,7 +190,10 @@ kubectl port-forward -n argocd svc/argocd-server 8080:443
 - Opción 3: Eliminar manualmente:
   ```bash
   kubectl delete application platform-root -n argocd
-  kubectl delete crd applications.argoproj.io  # Si no hay otros app
+  kubectl delete appproject platform-project -n argocd
+  # Esperar a que se eliminen
+  sleep 10
+  # Ejecutar el script nuevamente
   ```
 
 ### ArgoCD no está instalado
@@ -160,35 +209,42 @@ kubectl port-forward -n argocd svc/argocd-server 8080:443
 kubectl wait --for=condition=available --timeout=300s deployment/argocd-server -n argocd
 
 # Luego ejecutar el script
-./scripts/gen_root_app.sh
+./scripts/gen_root_plat.sh
 ```
 
-### Archivo YAML no encontrado
+### Archivos YAML no encontrados
 
-**Problema**: Error "platform/root-application.yaml no encontrado"
+**Problema**: Error "platform/root-platform.yaml no encontrado" o "argocd-proyects/platfrom_proyect.yaml no encontrado"
 
 **Solución**:
-1. Crear el archivo YAML:
+1. Crear los archivos YAML:
    ```bash
    mkdir -p platform
-   # Crear platform/root-application.yaml con el contenido correcto
+   mkdir -p argocd-proyects
+   # Crear platform/root-platform.yaml con contenido correcto
+   # Crear argocd-proyects/platfrom_proyect.yaml con contenido correcto
    ```
-2. Commitear y verificar que está en el repositorio
+2. Commitear y verificar que están en el repositorio
 3. Ejecutar nuevamente el script
 
-### Timeout esperando Application
+### Timeout esperando Project/Application
 
-**Problema**: El script espera demasiado tiempo
+**Problema**: El script espera demasiado tiempo para que se registren
 
 **Solución**:
-- Aumentar el timeout en el script (línea con `retry`)
 - Verificar los logs de ArgoCD:
   ```bash
-  kubectl logs -n argocd -l app.kubernetes.io/name=argocd-server
+  kubectl logs -n argocd -l app.kubernetes.io/name=argocd-server -f
   ```
 - Comprobar si hay errores de validación YAML:
   ```bash
-  kubectl apply -f platform/root-application.yaml --dry-run=client -v=9
+  kubectl apply -f argocd-proyects/platfrom_proyect.yaml --dry-run=client -v=9
+  kubectl apply -f platform/root-platform.yaml --dry-run=client -v=9
+  ```
+- Verificar que el Project existe antes que la Application:
+  ```bash
+  kubectl get appproject platform-project -n argocd
+  kubectl get application platform-root -n argocd
   ```
 
 ### Fallo de conectividad con el cluster
@@ -262,46 +318,60 @@ La Application está correctamente aplicada cuando:
 
 ## Archivos Relacionados
 
-- 📄 `scripts/gen_root_app.sh` - Script de aplicación manual
-- 🔧 `.github/workflows/apply_rootapp.yaml` - Workflow de GitHub Actions
-- 📋 `platform/root-application.yaml` - Manifiesto de la Application
+- 📄 `scripts/gen_root_plat.sh` - Script de aplicación manual
+- 🔧 `.github/workflows/apply_rootplat.yaml` - Workflow de GitHub Actions
+- 📋 `argocd-proyects/platfrom_proyect.yaml` - Manifiesto del ArgoCD Project
+- 📋 `platform/root-platform.yaml` - Manifiesto de la Root Application
 - 📖 `BOOTSTRAP_ARGOCD_GUIDE.md` - Cómo instalar ArgoCD
 - 📖 `README.md` - Resumen general del proyecto
 
 ## Referencia Rápida
 
 ```bash
-# Aplicar Root Application
-./scripts/gen_root_app.sh
+# Aplicar Root Platform (Project + Application)
+./scripts/gen_root_plat.sh
 
-# Verificar estado
+# Verificar estado del Project
+kubectl get appproject platform-project -n argocd
+
+# Verificar estado de la Application
 kubectl get application platform-root -n argocd
 
 # Actualizar forzadamente
-./scripts/gen_root_app.sh  # y responder 's'
+./scripts/gen_root_plat.sh  # y responder 's'
 
-# Eliminar Application (para reinstalar)
+# Eliminar recursos (para reinstalar)
 kubectl delete application platform-root -n argocd
+kubectl delete appproject platform-project -n argocd
 
-# Ver todos los componentes desplegados
+# Ver todos los componentes desplegados por ArgoCD
 kubectl get all --all-namespaces
 ```
 
 ## Preguntas Frecuentes
 
-**P: ¿Puedo aplicar la Root Application varias veces?**
-A: Sí, es seguro. El script comprueba si ya existe y te pide confirmación.
+**P: ¿Por qué necesitamos un AppProject separado?**
+A: El AppProject define permisos y alcance. Es una buena práctica de seguridad separarlos de la Application.
 
-**P: ¿Qué pasa si actualizo el archivo YAML en el repositorio?**
-A: ArgoCD no aplicará los cambios automáticamente a menos que esté configurada con `syncPolicy.automated`. Ejecuta el script nuevamente con `force_update=true`.
+**P: ¿Cuál es el orden de aplicación?**
+A: Primero Project, luego Application. La Application referencia el Project, así que debe existir primero.
 
-**P: ¿Necesito aplicar la Root Application en cada nodo?**
+**P: ¿Puedo aplicar la Root Platform varias veces?**
+A: Sí, es seguro. El script comprueba si ya existen y te pide confirmación.
+
+**P: ¿Qué pasa si actualizo los archivos YAML en el repositorio?**
+A: Si están configurados con `syncPolicy.automated`, ArgoCD aplicará los cambios automáticamente. De lo contrario, ejecuta el script nuevamente con `force_update=true`.
+
+**P: ¿Necesito aplicar la Root Platform en cada nodo?**
 A: No. Solo se aplica una vez en el cluster. ArgoCD gestiona el despliegue en todos los nodos.
 
 **P: ¿Puedo tener múltiples Root Applications?**
 A: No recomendado. Usa una sola Root Application que apunte a todas tus aplicaciones.
 
+**P: ¿Qué pasa si el Project ya existe pero la Application no?**
+A: El script aplicará solo la Application. Puedes usar `force_update=true` para forzar la actualización de ambas.
+
 ---
 
 **Última actualización**: 2026-04-09  
-**Versión**: 1.0
+**Versión**: 2.0 (con support para Project + Application)

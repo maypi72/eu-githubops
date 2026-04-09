@@ -1,10 +1,12 @@
-name: Apply Root Application
+name: Apply Root Platform
 
-# Este workflow aplica la root Application de ArgoCD para gestionar
-# la plataforma completa
+# Este workflow aplica el Project de ArgoCD y la root Application para 
+# gestionar la plataforma completa.
+# ORDEN: Primero Project, luego Root Application
 # REQUISITO: 
 #   - ArgoCD debe estar instalado en el cluster (ejecutar bootstrap-argocd.yml primero)
-#   - El archivo platform/root-application.yaml debe existir
+#   - El archivo argocd-proyects/platfrom_proyect.yaml debe existir
+#   - El archivo platform/root-platform.yaml debe existir
 on:
   workflow_dispatch:
     inputs:
@@ -31,8 +33,8 @@ env:
   LOG_LEVEL: info
 
 jobs:
-  apply-rootapp:
-    name: Apply Root Application
+  apply-rootplat:
+    name: Apply Root Platform (Project + Application)
     runs-on: [self-hosted, linux]
     timeout-minutes: 10
     environment: lab
@@ -147,56 +149,96 @@ jobs:
             exit 1
           fi
           
-          # Verificar archivo root-application.yaml
-          echo "[INFO] Verificando archivo root-application.yaml..."
-          if [ -f "platform/root-application.yaml" ]; then
-            echo "[✓] Archivo encontrado: platform/root-application.yaml"
+          # Verificar archivo del Project de ArgoCD
+          echo "[INFO] Verificando archivo del Project..."
+          if [ -f "argocd-proyects/platfrom_proyect.yaml" ]; then
+            echo "[✓] Archivo encontrado: argocd-proyects/platfrom_proyect.yaml"
           else
-            echo "[✗] ERROR: Archivo no encontrado: platform/root-application.yaml"
+            echo "[✗] ERROR: Archivo no encontrado: argocd-proyects/platfrom_proyect.yaml"
+            exit 1
+          fi
+          
+          # Verificar archivo root-platform.yaml
+          echo "[INFO] Verificando archivo root-platform.yaml..."
+          if [ -f "platform/root-platform.yaml" ]; then
+            echo "[✓] Archivo encontrado: platform/root-platform.yaml"
+          else
+            echo "[✗] ERROR: Archivo no encontrado: platform/root-platform.yaml"
             exit 1
           fi
           
           echo "::endgroup::"
 
-      - name: Validate Root Application Manifest
+      - name: Validate Manifests (Project and Root Application)
         if: ${{ !inputs.verify_only }}
         run: |
-          echo "::group::Validando manifiesto YAML"
+          echo "::group::Validando manifiestos YAML"
           
-          echo "[INFO] Validando sintaxis YAML..."
-          if kubectl apply -f platform/root-application.yaml --dry-run=client -n argocd >/dev/null 2>&1; then
-            echo "[✓] Manifiesto YAML válido"
+          echo "[INFO] Validando Project manifest..."
+          if kubectl apply -f argocd-proyects/platfrom_proyect.yaml --dry-run=client -n argocd >/dev/null 2>&1; then
+            echo "[✓] Project YAML válido"
           else
-            echo "[✗] ERROR: Manifiesto YAML inválido"
-            kubectl apply -f platform/root-application.yaml --dry-run=client -n argocd
+            echo "[✗] ERROR: Project YAML inválido"
+            kubectl apply -f argocd-proyects/platfrom_proyect.yaml --dry-run=client -n argocd
             exit 1
           fi
           
-          echo "[INFO] Contenido del manifiesto:"
-          kubectl apply -f platform/root-application.yaml --dry-run=client -n argocd -o yaml | head -50
+          echo "[INFO] Validando Root Application manifest..."
+          if kubectl apply -f platform/root-platform.yaml --dry-run=client -n argocd >/dev/null 2>&1; then
+            echo "[✓] Root Application YAML válido"
+          else
+            echo "[✗] ERROR: Root Application YAML inválido"
+            kubectl apply -f platform/root-platform.yaml --dry-run=client -n argocd
+            exit 1
+          fi
+          
+          echo "[INFO] Contenido del manifiestos (primeras 50 líneas):"
+          echo ""
+          echo "--- Project ---"
+          kubectl apply -f argocd-proyects/platfrom_proyect.yaml --dry-run=client -n argocd -o yaml | head -30
+          echo "..."
+          echo ""
+          echo "--- Root Application ---"
+          kubectl apply -f platform/root-platform.yaml --dry-run=client -n argocd -o yaml | head -30
           echo "..."
           
           echo "::endgroup::"
 
-      - name: Check Existing Application
-        id: check-app
+      - name: Check Existing Project and Application
+        id: check-resources
         run: |
-          echo "::group::Verificar Application existente"
+          echo "::group::Verificar recursos existentes"
           
-          APP_NAME="platform-root"
+          PROJECT_NAME="platform-project"
+          ROOT_APP_NAME="platform-root"
           NAMESPACE="argocd"
           
-          if kubectl get application "$APP_NAME" -n "$NAMESPACE" >/dev/null 2>&1; then
-            echo "[!] Application '$APP_NAME' ya existe"
+          # Verificar Project
+          if kubectl get appproject "$PROJECT_NAME" -n "$NAMESPACE" >/dev/null 2>&1; then
+            echo "[!] AppProject '$PROJECT_NAME' ya existe"
+            echo "project_exists=true" >> $GITHUB_OUTPUT
+            
+            echo "[INFO] Estado actual del Project:"
+            kubectl get appproject "$PROJECT_NAME" -n "$NAMESPACE" -o wide
+          else
+            echo "[✓] AppProject no existe - se creará"
+            echo "project_exists=false" >> $GITHUB_OUTPUT
+          fi
+          
+          echo ""
+          
+          # Verificar Application
+          if kubectl get application "$ROOT_APP_NAME" -n "$NAMESPACE" >/dev/null 2>&1; then
+            echo "[!] Application '$ROOT_APP_NAME' ya existe"
             echo "app_exists=true" >> $GITHUB_OUTPUT
             
             echo "[INFO] Estado actual:"
-            kubectl get application "$APP_NAME" -n "$NAMESPACE" -o wide
+            kubectl get application "$ROOT_APP_NAME" -n "$NAMESPACE" -o wide
             
             echo ""
             echo "[INFO] Estado de sincronización:"
-            SYNC_STATUS=$(kubectl get application "$APP_NAME" -n "$NAMESPACE" -o jsonpath='{.status.sync.status}')
-            HEALTH_STATUS=$(kubectl get application "$APP_NAME" -n "$NAMESPACE" -o jsonpath='{.status.health.status}')
+            SYNC_STATUS=$(kubectl get application "$ROOT_APP_NAME" -n "$NAMESPACE" -o jsonpath='{.status.sync.status}')
+            HEALTH_STATUS=$(kubectl get application "$ROOT_APP_NAME" -n "$NAMESPACE" -o jsonpath='{.status.health.status}')
             echo "  Sync: $SYNC_STATUS"
             echo "  Health: $HEALTH_STATUS"
           else
@@ -206,23 +248,59 @@ jobs:
           
           echo "::endgroup::"
 
-      - name: Apply Root Application
-        if: ${{ !inputs.verify_only && (steps.check-app.outputs.app_exists == 'false' || inputs.force_update) }}
+      - name: Apply ArgoCD Project
+        if: ${{ !inputs.verify_only && (steps.check-resources.outputs.project_exists == 'false' || inputs.force_update) }}
         run: |
-          echo "::group::Aplicar Root Application"
+          echo "::group::Aplicar ArgoCD Project"
           
-          APP_NAME="platform-root"
+          PROJECT_NAME="platform-project"
           NAMESPACE="argocd"
           
-          echo "[INFO] Aplicando: platform/root-application.yaml"
-          kubectl apply -f platform/root-application.yaml -n "$NAMESPACE"
+          echo "[INFO] Aplicando Project: argocd-proyects/platfrom_proyect.yaml"
+          kubectl apply -f argocd-proyects/platfrom_proyect.yaml -n "$NAMESPACE"
+          
+          echo ""
+          echo "[INFO] Esperando a que Project se registre en ArgoCD..."
+          
+          # Intentar hasta 30 segundos
+          for i in {1..30}; do
+            if kubectl get appproject "$PROJECT_NAME" -n "$NAMESPACE" >/dev/null 2>&1; then
+              echo "[✓] AppProject registrado en ArgoCD"
+              break
+            fi
+            echo "[INFO] Intento $i/30..."
+            sleep 1
+          done
+          
+          if ! kubectl get appproject "$PROJECT_NAME" -n "$NAMESPACE" >/dev/null 2>&1; then
+            echo "[✗] Timeout esperando Project"
+            exit 1
+          fi
+          
+          echo "[✓] ArgoCD Project aplicado exitosamente"
+          echo ""
+          echo "[INFO] Detalles del Project:"
+          kubectl get appproject "$PROJECT_NAME" -n "$NAMESPACE" -o wide
+          
+          echo "::endgroup::"
+
+      - name: Apply Root Application
+        if: ${{ !inputs.verify_only && (steps.check-resources.outputs.app_exists == 'false' || inputs.force_update) }}
+        run: |
+          echo "::group::Aplicar Root Platform Application"
+          
+          ROOT_APP_NAME="platform-root"
+          NAMESPACE="argocd"
+          
+          echo "[INFO] Aplicando Root Application: platform/root-platform.yaml"
+          kubectl apply -f platform/root-platform.yaml -n "$NAMESPACE"
           
           echo ""
           echo "[INFO] Esperando a que Application se registre en ArgoCD..."
           
           # Intentar hasta 30 segundos
           for i in {1..30}; do
-            if kubectl get application "$APP_NAME" -n "$NAMESPACE" >/dev/null 2>&1; then
+            if kubectl get application "$ROOT_APP_NAME" -n "$NAMESPACE" >/dev/null 2>&1; then
               echo "[✓] Application registrada en ArgoCD"
               break
             fi
@@ -230,7 +308,7 @@ jobs:
             sleep 1
           done
           
-          if ! kubectl get application "$APP_NAME" -n "$NAMESPACE" >/dev/null 2>&1; then
+          if ! kubectl get application "$ROOT_APP_NAME" -n "$NAMESPACE" >/dev/null 2>&1; then
             echo "[✗] Timeout esperando Application"
             exit 1
           fi
@@ -238,15 +316,15 @@ jobs:
           echo "[✓] Root Application aplicado exitosamente"
           echo ""
           echo "[INFO] Detalles de la Application:"
-          kubectl get application "$APP_NAME" -n "$NAMESPACE" -o wide
+          kubectl get application "$ROOT_APP_NAME" -n "$NAMESPACE" -o wide
           
           echo "::endgroup::"
 
-      - name: Skip Application (Already exists and not forced)
-        if: ${{ !inputs.verify_only && steps.check-app.outputs.app_exists == 'true' && !inputs.force_update }}
+      - name: Skip Resources (Already exist and not forced)
+        if: ${{ !inputs.verify_only && steps.check-resources.outputs.project_exists == 'true' && steps.check-resources.outputs.app_exists == 'true' && !inputs.force_update }}
         run: |
           echo "::group::Operación cancelada"
-          echo "[!] Application ya existe y force_update no está activado"
+          echo "[!] Project y Application ya existen y force_update no está activado"
           echo ""
           echo "Para actualizar, ejecuta con force_update=true"
           echo "::endgroup::"
@@ -256,15 +334,20 @@ jobs:
         run: |
           echo "::group::Verificar despliegue"
           
-          APP_NAME="platform-root"
+          PROJECT_NAME="platform-project"
+          ROOT_APP_NAME="platform-root"
           NAMESPACE="argocd"
           
-          echo "[INFO] Estado de la Application:"
-          kubectl get application "$APP_NAME" -n "$NAMESPACE" -o wide
+          echo "[INFO] Estado del Project:"
+          kubectl get appproject "$PROJECT_NAME" -n "$NAMESPACE" -o wide || echo "[!] Project no disponible"
           
           echo ""
-          echo "[INFO] Detalles completos:"
-          kubectl describe application "$APP_NAME" -n "$NAMESPACE" | head -100
+          echo "[INFO] Estado de la Application:"
+          kubectl get application "$ROOT_APP_NAME" -n "$NAMESPACE" -o wide || echo "[!] Application no disponible"
+          
+          echo ""
+          echo "[INFO] Detalles completos de la Application:"
+          kubectl describe application "$ROOT_APP_NAME" -n "$NAMESPACE" | head -100 || echo "[!] No disponible"
           
           echo "::endgroup::"
 
@@ -273,8 +356,12 @@ jobs:
         run: |
           echo "::group::Verificación (Dry Run)"
           
-          echo "[INFO] Ejecutando dry-run..."
-          kubectl apply -f platform/root-application.yaml --dry-run=client -n argocd -o yaml
+          echo "[INFO] Ejecutando dry-run del Project..."
+          kubectl apply -f argocd-proyects/platfrom_proyect.yaml --dry-run=client -n argocd -o yaml
+          
+          echo ""
+          echo "[INFO] Ejecutando dry-run de la Root Application..."
+          kubectl apply -f platform/root-platform.yaml --dry-run=client -n argocd -o yaml
           
           echo ""
           echo "[✓] Dry run completado exitosamente"
@@ -287,19 +374,23 @@ jobs:
         run: |
           echo "::group::Próximos pasos"
           
-          APP_NAME="platform-root"
+          PROJECT_NAME="platform-project"
+          ROOT_APP_NAME="platform-root"
           NAMESPACE="argocd"
           
           echo ""
           echo "==============================================="
-          echo "Root Application aplicada correctamente"
+          echo "Root Platform (Project + Application) aplicada"
           echo "==============================================="
           echo ""
           echo "Para monitorear la sincronización:"
-          echo "  kubectl get application $APP_NAME -n $NAMESPACE -w"
+          echo "  kubectl get application $ROOT_APP_NAME -n $NAMESPACE -w"
           echo ""
-          echo "Para ver detalles:"
-          echo "  kubectl describe application $APP_NAME -n $NAMESPACE"
+          echo "Para ver detalles de la Application:"
+          echo "  kubectl describe application $ROOT_APP_NAME -n $NAMESPACE"
+          echo ""
+          echo "Para ver detalles del Project:"
+          echo "  kubectl describe appproject $PROJECT_NAME -n $NAMESPACE"
           echo ""
           echo "Para ver logs:"
           echo "  kubectl logs -n $NAMESPACE -l app.kubernetes.io/name=argocd-server -f"
@@ -315,6 +406,14 @@ jobs:
           
           echo "[INFO] Estado de ArgoCD:"
           kubectl get pods -n argocd -o wide || true
+          
+          echo ""
+          echo "[INFO] Estado del Project:"
+          kubectl get appproject -n argocd -o wide || true
+          
+          echo ""
+          echo "[INFO] Estado de la Application:"
+          kubectl get application -n argocd -o wide || true
           
           echo ""
           echo "[INFO] Últimas líneas de logs de argocd-server:"

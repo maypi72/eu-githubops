@@ -3,16 +3,18 @@ set -euo pipefail
 IFS=$'\n\t'
 
 # ============================================================================
-# Script: gen_root_app.sh
-# Descripción: Aplica la root Application de ArgoCD para gestionar la 
-#              plataforma completa
+# Script: gen_root_plat.sh
+# Descripción: Aplica el proyecto de ArgoCD y la root Application de la 
+#              plataforma completa (primero projects, luego root)
 # Requisitos: kubectl configurado, acceso al cluster Kubernetes
 # ============================================================================
 
 # Configuración
-APP_NAME="platform-root"
 NAMESPACE="argocd"
-ROOT_APP_FILE="platform/root-application.yaml"
+PROJECT_NAME="platform-project"
+ROOT_APP_NAME="platform-root"
+PROJECTS_FILE="argocd-proyects/platfrom_proyect.yaml"
+ROOT_APP_FILE="platform/root-platform.yaml"
 
 # Obtener directorio del script
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -125,7 +127,13 @@ if ! kubectl get deployment -n "$NAMESPACE" -l app.kubernetes.io/name=argocd-ser
 fi
 log_success "ArgoCD está instalado en '$NAMESPACE'"
 
-# Comprobar que el archivo root-application.yaml existe
+# Comprobar que los archivos YAML existen
+if [ ! -f "$REPO_ROOT/$PROJECTS_FILE" ]; then
+  log_error "Archivo no encontrado: $PROJECTS_FILE"
+  exit 1
+fi
+log_success "Archivo encontrado: $PROJECTS_FILE"
+
 if [ ! -f "$REPO_ROOT/$ROOT_APP_FILE" ]; then
   log_error "Archivo no encontrado: $ROOT_APP_FILE"
   exit 1
@@ -135,33 +143,80 @@ log_success "Archivo encontrado: $ROOT_APP_FILE"
 echo "::endgroup::"
 
 # ============================================================================
-# Comprobar si la Application ya existe
+# Comprobar si Project y Application ya existen
 # ============================================================================
 
-echo "::group::Verificar estado de Application"
+echo "::group::Verificar estado de Project y Application"
 
-if kubectl get application "$APP_NAME" -n "$NAMESPACE" >/dev/null 2>&1; then
-  log_warning "Application '$APP_NAME' ya existe"
+# Verificar Project
+PROJECT_EXISTS=false
+if kubectl get appproject "$PROJECT_NAME" -n "$NAMESPACE" >/dev/null 2>&1; then
+  log_warning "AppProject '$PROJECT_NAME' ya existe"
+  PROJECT_EXISTS=true
   
-  # Obtener información de la Application actual
+  echo ""
+  log_info "Estado actual del AppProject:"
+  kubectl get appproject "$PROJECT_NAME" -n "$NAMESPACE" -o wide
+  echo ""
+else
+  log_info "AppProject '$PROJECT_NAME' no existe - se creará"
+fi
+
+echo ""
+
+# Verificar Application
+APP_EXISTS=false
+if kubectl get application "$ROOT_APP_NAME" -n "$NAMESPACE" >/dev/null 2>&1; then
+  log_warning "Application '$ROOT_APP_NAME' ya existe"
+  APP_EXISTS=true
+  
   echo ""
   log_info "Estado actual de la Application:"
-  kubectl get application "$APP_NAME" -n "$NAMESPACE" -o wide
+  kubectl get application "$ROOT_APP_NAME" -n "$NAMESPACE" -o wide
   
   echo ""
   log_info "Sincronización:"
-  kubectl get application "$APP_NAME" -n "$NAMESPACE" -o jsonpath='{.status.sync.status}' 2>/dev/null || echo "Desconocido"
+  kubectl get application "$ROOT_APP_NAME" -n "$NAMESPACE" -o jsonpath='{.status.sync.status}' 2>/dev/null || echo "Desconocido"
   echo ""
-  
-  echo ""
-  read -p "¿Actualizar Application existente? (s/n) " -n 1 -r
+else
+  log_info "Application '$ROOT_APP_NAME' no existe - se creará"
+fi
+
+echo ""
+
+# Si ambos existen, preguntar para actualizar
+if [ "$PROJECT_EXISTS" = true ] && [ "$APP_EXISTS" = true ]; then
+  read -p "¿Actualizar Project y Application existentes? (s/n) " -n 1 -r
   echo
   if [[ ! $REPLY =~ ^[Ss]$ ]]; then
     log_success "Operación cancelada por el usuario"
     exit 0
   fi
+fi
+
+echo "::endgroup::"
+
+# ============================================================================
+# Aplicar ArgoCD Project primero
+# ============================================================================
+
+echo "::group::Aplicar ArgoCD Project"
+
+log_info "Aplicando Project: $PROJECTS_FILE"
+if retry kubectl apply -f "$REPO_ROOT/$PROJECTS_FILE" -n "$NAMESPACE"; then
+  log_success "ArgoCD Project aplicado correctamente"
 else
-  log_info "Application '$APP_NAME' no existe - se creará"
+  log_error "Falló al aplicar ArgoCD Project"
+  exit 1
+fi
+
+# Esperar a que el Project se cree en ArgoCD
+log_info "Esperando a que ArgoCD reconozca el Project..."
+if retry kubectl get appproject "$PROJECT_NAME" -n "$NAMESPACE" >/dev/null 2>&1; then
+  log_success "AppProject registrado en ArgoCD"
+else
+  log_error "Timeout esperando a que AppProject se registre"
+  exit 1
 fi
 
 echo "::endgroup::"
@@ -170,10 +225,10 @@ echo "::endgroup::"
 # Aplicar root Application
 # ============================================================================
 
-echo "::group::Aplicar root Application"
+echo "::group::Aplicar root Platform Application"
 
-log_info "Aplicando: $ROOT_APP_FILE"
-if retry kubectl apply -f "$REPO_ROOT/$ROOT_APP_FILE"; then
+log_info "Aplicando Root Application: $ROOT_APP_FILE"
+if retry kubectl apply -f "$REPO_ROOT/$ROOT_APP_FILE" -n "$NAMESPACE"; then
   log_success "Root Application aplicado correctamente"
 else
   log_error "Falló al aplicar root Application"
@@ -182,7 +237,7 @@ fi
 
 # Esperar a que la Application se cree en ArgoCD
 log_info "Esperando a que ArgoCD reconozca la Application..."
-if retry kubectl get application "$APP_NAME" -n "$NAMESPACE" >/dev/null 2>&1; then
+if retry kubectl get application "$ROOT_APP_NAME" -n "$NAMESPACE" >/dev/null 2>&1; then
   log_success "Application registrada en ArgoCD"
 else
   log_error "Timeout esperando a que Application se registre"
@@ -197,18 +252,21 @@ echo "::endgroup::"
 
 echo "::group::Estado final"
 
-log_success "Root Application aplicada exitosamente"
+log_success "Project y Root Application aplicados exitosamente"
 echo ""
-log_info "Detalles de la Application:"
-kubectl get application "$APP_NAME" -n "$NAMESPACE" -o jsonpath='{.spec.destination.server}' 2>/dev/null && \
-  echo " (Servidor de destino: $(kubectl get application "$APP_NAME" -n "$NAMESPACE" -o jsonpath='{.spec.destination.server}'))"
+log_info "Detalles del Project:"
+kubectl get appproject "$PROJECT_NAME" -n "$NAMESPACE" -o wide
+echo ""
 
+log_info "Detalles de la Application:"
+kubectl get application "$ROOT_APP_NAME" -n "$NAMESPACE" -o wide
 echo ""
+
 log_info "Para revisar el estado de sincronización, ejecuta:"
-echo "  kubectl get application $APP_NAME -n $NAMESPACE -w"
+echo "  kubectl get application $ROOT_APP_NAME -n $NAMESPACE -w"
 echo ""
 log_info "Para ver los detalles completos:"
-echo "  kubectl describe application $APP_NAME -n $NAMESPACE"
+echo "  kubectl describe application $ROOT_APP_NAME -n $NAMESPACE"
 echo ""
 
 echo "::endgroup::"
