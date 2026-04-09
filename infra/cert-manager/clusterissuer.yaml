@@ -1,0 +1,36 @@
+---
+# CA Autofirmada (Root Certificate Authority)
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: mygitops-ca
+  namespace: cert-manager
+spec:
+  isCA: true
+  commonName: mygitops-ca
+  secretName: mygitops-ca-key
+  privateKey:
+    algorithm: RSA
+    size: 2048
+  issuerRef:
+    name: selfsigned-issuer
+    kind: Issuer
+---
+# Issuer autofirmado (solo para crear la CA)
+apiVersion: cert-manager.io/v1
+kind: Issuer
+metadata:
+  name: selfsigned-issuer
+  namespace: cert-manager
+spec:
+  selfSigned: {}
+---
+# ClusterIssuer que usa la CA autofirmada
+apiVersion: cert-manager.io/v1
+kind: ClusterIssuer
+metadata:
+  name: mygitops-ca
+  namespace: cert-manager
+spec:
+  ca:
+    secretName: mygitops-ca-key

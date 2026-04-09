@@ -13,6 +13,7 @@ BOOTSTRAP_K3S="${SCRIPT_DIR}/bootstrap_k3s.sh"
 BOOTSTRAP_HELM="${SCRIPT_DIR}/bootstrap_helm.sh"
 BOOTSTRAP_INGRESS="${SCRIPT_DIR}/bootstrap_ingress.sh"
 BOOTSTRAP_CERT_MANAGER="${SCRIPT_DIR}/bootstrap_certmanager.sh"
+BOOTSTRAP_CLUSTERISSUER="${SCRIPT_DIR}/bootstrap_clusterissuer.sh"
 BOOTSTRAP_SEALED_SECRETS="${SCRIPT_DIR}/bootstrap_sealed_secrets.sh"
 
 # Variables globales
@@ -25,7 +26,7 @@ echo "BOOTSTRAP COMPLETO - Orquestador"
 echo "================================================"
 
 # Comprobar que todos los scripts existen
-for script in "$BOOTSTRAP_K3S" "$BOOTSTRAP_HELM" "$BOOTSTRAP_INGRESS" "$BOOTSTRAP_CERT_MANAGER" "$BOOTSTRAP_SEALED_SECRETS"; do
+for script in "$BOOTSTRAP_K3S" "$BOOTSTRAP_HELM" "$BOOTSTRAP_INGRESS" "$BOOTSTRAP_CERT_MANAGER" "$BOOTSTRAP_CLUSTERISSUER" "$BOOTSTRAP_SEALED_SECRETS"; do
   if [ ! -f "$script" ]; then
     echo "ERROR: Script no encontrado: $script"
     exit 1
@@ -117,9 +118,15 @@ fi
 if ! run_bootstrap "bootstrap_certmanager.sh" "$BOOTSTRAP_CERT_MANAGER"; then
   FAILED=1
   echo "::warning::Falló la instalación de cert-manager, pero bootstrap parcial completado"
-fi  
+fi
 
-#5. Instalar sealed-secrets
+#5. Crear ClusterIssuer para cert-manager
+if ! run_bootstrap "bootstrap_clusterissuer.sh" "$BOOTSTRAP_CLUSTERISSUER"; then
+  FAILED=1
+  echo "::warning::Falló la creación de ClusterIssuer, pero bootstrap parcial completado"
+fi
+
+#6. Instalar sealed-secrets
 if ! run_bootstrap "bootstrap_sealed_secrets.sh" "$BOOTSTRAP_SEALED_SECRETS"; then
   FAILED=1
   echo "::warning::Falló la instalación de sealed-secrets, pero bootstrap parcial completado"
