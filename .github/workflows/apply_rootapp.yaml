@@ -1,0 +1,331 @@
+name: Apply Root Application
+
+# Este workflow aplica la root Application de ArgoCD para gestionar
+# la plataforma completa
+# REQUISITO: 
+#   - ArgoCD debe estar instalado en el cluster (ejecutar bootstrap-argocd.yml primero)
+#   - El archivo platform/root-application.yaml debe existir
+on:
+  workflow_dispatch:
+    inputs:
+      force_update:
+        description: 'Forzar actualización incluso si ya existe'
+        required: false
+        default: false
+        type: boolean
+      verify_only:
+        description: 'Solo verificar sin aplicar (dry-run)'
+        required: false
+        default: false
+        type: boolean
+
+permissions:
+  contents: read
+  id-token: write
+  actions: read
+
+env:
+  KUBECONFIG: $HOME/kubeconfig
+  RETRY_MAX: 5
+  RETRY_DELAY: 2
+  LOG_LEVEL: info
+
+jobs:
+  apply-rootapp:
+    name: Apply Root Application
+    runs-on: [self-hosted, linux]
+    timeout-minutes: 10
+    environment: lab
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Download kubeconfig artifact (optional)
+        id: download-artifact
+        uses: actions/download-artifact@v4
+        continue-on-error: true
+        with:
+          name: kubeconfig
+          path: ${{ runner.temp }}/kubeconfig-artifact
+
+      - name: Setup kubeconfig
+        run: |
+          echo "::group::Configurando kubeconfig"
+          
+          KUBECONFIG_FOUND=false
+          
+          # Buscar kubeconfig en rutas locales
+          KUBECONFIG_PATHS=(
+            "$KUBECONFIG"
+            "/etc/rancher/k3s/k3s.yaml"
+            "$HOME/kubeconfig"
+            "$HOME/.kube/config"
+          )
+          
+          echo "[INFO] Buscando KUBECONFIG en rutas locales..."
+          for kb_path in "${KUBECONFIG_PATHS[@]}"; do
+            if [ -f "$kb_path" ]; then
+              echo "[✓] KUBECONFIG encontrado localmente: $kb_path"
+              export KUBECONFIG="$kb_path"
+              echo "KUBECONFIG=$KUBECONFIG" >> $GITHUB_ENV
+              KUBECONFIG_FOUND=true
+              break
+            fi
+          done
+          
+          # Si no se encuentra localmente, intentar usar artefacto
+          if [ "$KUBECONFIG_FOUND" = false ]; then
+            echo "[!] KUBECONFIG no encontrado localmente"
+            
+            if [ "${{ steps.download-artifact.outcome }}" = "success" ] && [ -f "${{ runner.temp }}/kubeconfig-artifact/kubeconfig" ]; then
+              echo "[✓] Usando artefacto descargado"
+              cp "${{ runner.temp }}/kubeconfig-artifact/kubeconfig" "$KUBECONFIG"
+              chmod 600 "$KUBECONFIG"
+              echo "KUBECONFIG=$KUBECONFIG" >> $GITHUB_ENV
+              KUBECONFIG_FOUND=true
+            else
+              echo "[✗] Artefacto no disponible"
+              echo ""
+              echo "ERROR: No se encontró KUBECONFIG"
+              echo "Asegúrate que k3s está instalado en /etc/rancher/k3s/k3s.yaml o en $HOME/kubeconfig"
+              exit 1
+            fi
+          fi
+          
+          # Verificar conectividad
+          if [ -f "$KUBECONFIG" ]; then
+            echo "[✓] KUBECONFIG validado: $(ls -lh $KUBECONFIG | awk '{print $5, $9}')"
+            echo "[INFO] Verificando conectividad al cluster..."
+            if kubectl cluster-info &>/dev/null; then
+              echo "[✓] Conexión al cluster OK"
+            else
+              echo "[✗] No se puede conectar al cluster"
+              exit 1
+            fi
+          else
+            echo "[✗] ERROR: KUBECONFIG no es accesible"
+            exit 1
+          fi
+          
+          echo "::endgroup::"
+
+      - name: Validate Prerequisites
+        run: |
+          echo "::group::Validando prerrequisitos"
+          
+          # Verificar herramientas
+          tools=("kubectl")
+          for tool in "${tools[@]}"; do
+            if command -v "$tool" >/dev/null 2>&1; then
+              echo "[✓] $tool disponible"
+            else
+              echo "[✗] ERROR: $tool no está instalado"
+              exit 1
+            fi
+          done
+          
+          # Verificar namespace de ArgoCD
+          echo "[INFO] Verificando namespace de ArgoCD..."
+          if kubectl get namespace argocd >/dev/null 2>&1; then
+            echo "[✓] Namespace 'argocd' existe"
+          else
+            echo "[✗] ERROR: Namespace 'argocd' no existe"
+            echo "    Ejecuta el workflow 'bootstrap-argocd.yml' primero"
+            exit 1
+          fi
+          
+          # Verificar ArgoCD está instalado
+          echo "[INFO] Verificando ArgoCD installation..."
+          if kubectl get deployment -n argocd -l app.kubernetes.io/name=argocd-server >/dev/null 2>&1; then
+            echo "[✓] ArgoCD está instalado"
+          else
+            echo "[✗] ERROR: ArgoCD no está instalado en namespace argocd"
+            exit 1
+          fi
+          
+          # Verificar archivo root-application.yaml
+          echo "[INFO] Verificando archivo root-application.yaml..."
+          if [ -f "platform/root-application.yaml" ]; then
+            echo "[✓] Archivo encontrado: platform/root-application.yaml"
+          else
+            echo "[✗] ERROR: Archivo no encontrado: platform/root-application.yaml"
+            exit 1
+          fi
+          
+          echo "::endgroup::"
+
+      - name: Validate Root Application Manifest
+        if: ${{ !inputs.verify_only }}
+        run: |
+          echo "::group::Validando manifiesto YAML"
+          
+          echo "[INFO] Validando sintaxis YAML..."
+          if kubectl apply -f platform/root-application.yaml --dry-run=client -n argocd >/dev/null 2>&1; then
+            echo "[✓] Manifiesto YAML válido"
+          else
+            echo "[✗] ERROR: Manifiesto YAML inválido"
+            kubectl apply -f platform/root-application.yaml --dry-run=client -n argocd
+            exit 1
+          fi
+          
+          echo "[INFO] Contenido del manifiesto:"
+          kubectl apply -f platform/root-application.yaml --dry-run=client -n argocd -o yaml | head -50
+          echo "..."
+          
+          echo "::endgroup::"
+
+      - name: Check Existing Application
+        id: check-app
+        run: |
+          echo "::group::Verificar Application existente"
+          
+          APP_NAME="platform-root"
+          NAMESPACE="argocd"
+          
+          if kubectl get application "$APP_NAME" -n "$NAMESPACE" >/dev/null 2>&1; then
+            echo "[!] Application '$APP_NAME' ya existe"
+            echo "app_exists=true" >> $GITHUB_OUTPUT
+            
+            echo "[INFO] Estado actual:"
+            kubectl get application "$APP_NAME" -n "$NAMESPACE" -o wide
+            
+            echo ""
+            echo "[INFO] Estado de sincronización:"
+            SYNC_STATUS=$(kubectl get application "$APP_NAME" -n "$NAMESPACE" -o jsonpath='{.status.sync.status}')
+            HEALTH_STATUS=$(kubectl get application "$APP_NAME" -n "$NAMESPACE" -o jsonpath='{.status.health.status}')
+            echo "  Sync: $SYNC_STATUS"
+            echo "  Health: $HEALTH_STATUS"
+          else
+            echo "[✓] Application no existe - se creará"
+            echo "app_exists=false" >> $GITHUB_OUTPUT
+          fi
+          
+          echo "::endgroup::"
+
+      - name: Apply Root Application
+        if: ${{ !inputs.verify_only && (steps.check-app.outputs.app_exists == 'false' || inputs.force_update) }}
+        run: |
+          echo "::group::Aplicar Root Application"
+          
+          APP_NAME="platform-root"
+          NAMESPACE="argocd"
+          
+          echo "[INFO] Aplicando: platform/root-application.yaml"
+          kubectl apply -f platform/root-application.yaml -n "$NAMESPACE"
+          
+          echo ""
+          echo "[INFO] Esperando a que Application se registre en ArgoCD..."
+          
+          # Intentar hasta 30 segundos
+          for i in {1..30}; do
+            if kubectl get application "$APP_NAME" -n "$NAMESPACE" >/dev/null 2>&1; then
+              echo "[✓] Application registrada en ArgoCD"
+              break
+            fi
+            echo "[INFO] Intento $i/30..."
+            sleep 1
+          done
+          
+          if ! kubectl get application "$APP_NAME" -n "$NAMESPACE" >/dev/null 2>&1; then
+            echo "[✗] Timeout esperando Application"
+            exit 1
+          fi
+          
+          echo "[✓] Root Application aplicado exitosamente"
+          echo ""
+          echo "[INFO] Detalles de la Application:"
+          kubectl get application "$APP_NAME" -n "$NAMESPACE" -o wide
+          
+          echo "::endgroup::"
+
+      - name: Skip Application (Already exists and not forced)
+        if: ${{ !inputs.verify_only && steps.check-app.outputs.app_exists == 'true' && !inputs.force_update }}
+        run: |
+          echo "::group::Operación cancelada"
+          echo "[!] Application ya existe y force_update no está activado"
+          echo ""
+          echo "Para actualizar, ejecuta con force_update=true"
+          echo "::endgroup::"
+
+      - name: Verify Deployment
+        if: ${{ !inputs.verify_only }}
+        run: |
+          echo "::group::Verificar despliegue"
+          
+          APP_NAME="platform-root"
+          NAMESPACE="argocd"
+          
+          echo "[INFO] Estado de la Application:"
+          kubectl get application "$APP_NAME" -n "$NAMESPACE" -o wide
+          
+          echo ""
+          echo "[INFO] Detalles completos:"
+          kubectl describe application "$APP_NAME" -n "$NAMESPACE" | head -100
+          
+          echo "::endgroup::"
+
+      - name: Dry Run (Verify Mode)
+        if: ${{ inputs.verify_only }}
+        run: |
+          echo "::group::Verificación (Dry Run)"
+          
+          echo "[INFO] Ejecutando dry-run..."
+          kubectl apply -f platform/root-application.yaml --dry-run=client -n argocd -o yaml
+          
+          echo ""
+          echo "[✓] Dry run completado exitosamente"
+          echo "    Para aplicar real: ejecuta sin verify_only o con force_update"
+          
+          echo "::endgroup::"
+
+      - name: Post-Deployment Instructions
+        if: success()
+        run: |
+          echo "::group::Próximos pasos"
+          
+          APP_NAME="platform-root"
+          NAMESPACE="argocd"
+          
+          echo ""
+          echo "==============================================="
+          echo "Root Application aplicada correctamente"
+          echo "==============================================="
+          echo ""
+          echo "Para monitorear la sincronización:"
+          echo "  kubectl get application $APP_NAME -n $NAMESPACE -w"
+          echo ""
+          echo "Para ver detalles:"
+          echo "  kubectl describe application $APP_NAME -n $NAMESPACE"
+          echo ""
+          echo "Para ver logs:"
+          echo "  kubectl logs -n $NAMESPACE -l app.kubernetes.io/name=argocd-server -f"
+          echo ""
+          echo "==============================================="
+          
+          echo "::endgroup::"
+
+      - name: Failure Diagnostics
+        if: failure()
+        run: |
+          echo "::group::Diagnóstico de errores"
+          
+          echo "[INFO] Estado de ArgoCD:"
+          kubectl get pods -n argocd -o wide || true
+          
+          echo ""
+          echo "[INFO] Últimas líneas de logs de argocd-server:"
+          kubectl logs -n argocd -l app.kubernetes.io/name=argocd-server --tail=50 || true
+          
+          echo ""
+          echo "[INFO] Estado del namespace argocd:"
+          kubectl describe namespace argocd || true
+          
+          echo ""
+          echo "[INFO] Eventos recientes:"
+          kubectl get events -n argocd --sort-by='.lastTimestamp' | tail -20 || true
+          
+          echo "::endgroup::"
