@@ -1,5 +1,8 @@
 name: Bootstrap ArgoCD
 
+# Este workflow configura ArgoCD en el cluster Kubernetes
+# REQUISITO: Debe existir el GitHub Secret ARGOCD_ADMIN_PASSWORD
+# Crear en: Settings > Secrets and variables > Actions > New repository secret
 on:
   workflow_dispatch:
     inputs:
@@ -164,6 +167,92 @@ jobs:
           
           echo "::endgroup::"
 
+      - name: Verify Dependencies for Secret Generation
+        run: |
+          echo "::group::Verificando dependencias para generación de secreto"
+          
+          tools=("htpasswd" "yq" "kubeseal")
+          for tool in "${tools[@]}"; do
+            if command -v "$tool" >/dev/null 2>&1; then
+              version=$($tool --version 2>&1 | head -1 || echo "instalado")
+              echo "[✓] $tool: $version"
+            else
+              echo "[!] $tool no está instalado (se instalará durante el proceso)"
+            fi
+          done
+          
+          echo "::endgroup::"
+
+      - name: Generate ArgoCD Sealed Secret
+        id: generate-secret
+        env:
+          ARGOCD_ADMIN_PASSWORD: ${{ secrets.ARGOCD_ADMIN_PASSWORD }}
+        run: |
+          echo "::group::Generando secreto sellado de ArgoCD"
+          
+          # Verificar que la contraseña está configurada
+          if [ -z "$ARGOCD_ADMIN_PASSWORD" ]; then
+            echo "[✗] ERROR: ARGOCD_ADMIN_PASSWORD no está definida en GitHub Secrets"
+            echo "    Agrega el secret en: Settings > Secrets and variables > Actions"
+            exit 1
+          fi
+          echo "[✓] ARGOCD_ADMIN_PASSWORD está configurada"
+          
+          # Verificar que el script existe
+          if [ ! -f "scripts/gen_argocd_secret.sh" ]; then
+            echo "[✗] ERROR: scripts/gen_argocd_secret.sh no encontrado"
+            exit 1
+          fi
+          echo "[✓] Script de generación encontrado"
+          
+          # Hacer el script ejecutable
+          chmod +x scripts/gen_argocd_secret.sh
+          echo "[✓] Permisos ejecutables otorgados"
+          
+          # Ejecutar el script
+          echo ""
+          echo "Ejecutando generación de secreto..."
+          if bash scripts/gen_argocd_secret.sh; then
+            echo "[✓] Secreto sellado generado exitosamente"
+            echo "secret_generated=true" >> $GITHUB_OUTPUT
+          else
+            echo "[✗] Error generando el secreto"
+            exit 1
+          fi
+          
+          # Verificar que el archivo se generó
+          SEALED_SECRET_FILE="infra/argocd/sealed-secrets/argocd-secret.yaml"
+          if [ ! -f "$SEALED_SECRET_FILE" ]; then
+            echo "[✗] ERROR: El archivo de secreto no fue generado: $SEALED_SECRET_FILE"
+            exit 1
+          fi
+          echo "[✓] Archivo generado: $SEALED_SECRET_FILE"
+          
+          # Validar que el YAML es válido
+          if yq eval '.' "$SEALED_SECRET_FILE" > /dev/null 2>&1; then
+            echo "[✓] Formato YAML válido"
+          else
+            echo "[✗] ERROR: El archivo YAML no es válido"
+            yq eval '.' "$SEALED_SECRET_FILE"
+            exit 1
+          fi
+          
+          # Validar estructura del SealedSecret
+          if ! yq eval '.apiVersion' "$SEALED_SECRET_FILE" | grep -q "bitnami.com"; then
+            echo "[✗] ERROR: apiVersion no es válida para SealedSecret"
+            exit 1
+          fi
+          
+          if ! yq eval '.kind' "$SEALED_SECRET_FILE" | grep -q "SealedSecret"; then
+            echo "[✗] ERROR: kind debe ser SealedSecret"
+            exit 1
+          fi
+          
+          echo "[✓] Estructura de SealedSecret validada"
+          echo "[✓] Secreto listo para aplicar"
+          
+          echo "::endgroup::"
+
       - name: Execute Bootstrap ArgoCD
         id: bootstrap-argocd
         run: |
@@ -217,7 +306,7 @@ jobs:
           echo "::endgroup::"
 
       - name: Apply Sealed Secret
-        if: success()
+        if: success() && steps.generate-secret.outputs.secret_generated == 'true'
         run: |
           echo "::group::Aplicando secreto sellado de ArgoCD"
           
@@ -317,6 +406,31 @@ jobs:
             echo "  4. En la siguiente ejecución de este workflow se aplicará automáticamente"
             echo ""
             echo "Por ahora, ArgoCD usando la contraseña por defecto."
+          fi
+          
+          echo "::endgroup::"
+
+      - name: Push Generated Changes
+        if: success()
+        run: |
+          echo "::group::Pushing generated changes"
+          
+          # Verificar si hay cambios no pusheados
+          if git status --porcelain | grep -q "infra/argocd/sealed-secrets"; then
+            echo "[i] Cambios detectados en secreto sellado"
+            
+            # Configurar git
+            git config user.name "github-actions[bot]"
+            git config user.email "github-actions[bot]@users.noreply.github.com"
+            
+            # Hacer add, commit y push
+            git add infra/argocd/sealed-secrets/argocd-secret.yaml
+            git commit -m "chore: update ArgoCD sealed secret (from bootstrap workflow)" || echo "[!] Sin cambios nuevos para commit"
+            git push origin $(git rev-parse --abbrev-ref HEAD)
+            
+            echo "[✓] Cambios pusheados exitosamente"
+          else
+            echo "[i] Sin cambios para pushear"
           fi
           
           echo "::endgroup::"

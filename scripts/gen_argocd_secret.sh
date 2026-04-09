@@ -7,6 +7,11 @@ SECRET_NAME="argocd-secret"
 OUT_DIR="infra/argocd/sealed-secrets"
 CERT_PATH="infra/sealed-secrets/pub-cert.pem"
 
+# Detectar si se ejecuta desde GitHub Actions
+# Si la variable CI está definida, no hacemos git push automático
+CI_ENVIRONMENT="${CI:-false}"
+SKIP_GIT_PUSH="${SKIP_GIT_PUSH:-${CI_ENVIRONMENT}}"
+
 echo "::group::Verificando configuración"
 
 # Verificar que la clave pública existe
@@ -81,6 +86,8 @@ kind: Secret
 metadata:
   name: ${SECRET_NAME}
   namespace: ${NAMESPACE}
+  annotations:
+    argocd.argoproj.io/sync-wave: "0"
 type: Opaque
 data:
   admin.password: $(echo -n "$htpasswd" | base64 -w0)
@@ -96,12 +103,11 @@ kubeseal \
   --scope strict \
   < "${OUT_DIR}/${SECRET_NAME}.raw.yaml" \
   > "${OUT_DIR}/${SECRET_NAME}.yaml"
-echo "✓ Secret sellado en ${OUT_DIR}/${SECRET_NAME}.yaml"
-echo "::endgroup::"
 
-echo "::group::Añadiendo sync-wave"
-yq e '.metadata.annotations."argocd.argoproj.io/sync-wave" = "0"' -i "${OUT_DIR}/${SECRET_NAME}.yaml"
-echo "✓ sync-wave añadido"
+# Eliminar cualquier contenido malformado después del SealedSecret válido
+sed -i '/^---$/d' "${OUT_DIR}/${SECRET_NAME}.yaml"
+
+echo "✓ Secret sellado en ${OUT_DIR}/${SECRET_NAME}.yaml"
 echo "::endgroup::"
 
 echo "::group::Limpieza"
@@ -110,13 +116,29 @@ echo "✓ Archivo raw eliminado"
 echo "::endgroup::"
 
 echo "::group::Git operations"
+
+# Preparar git (en caso de que no esté configurado)
+if [ "$CI_ENVIRONMENT" = "true" ]; then
+  echo "[i] Ambiente CI detectado (GitHub Actions)"
+  # Configurar git en CI
+  git config user.name "github-actions[bot]" 2>/dev/null || true
+  git config user.email "github-actions[bot]@users.noreply.github.com" 2>/dev/null || true
+fi
+
 git add "${OUT_DIR}/${SECRET_NAME}.yaml"
+
 if git diff --cached --quiet; then
   echo "[!] Sin cambios para hacer commit"
 else
   git commit -m "chore: update ArgoCD sealed secret"
-  git push origin $(git rev-parse --abbrev-ref HEAD)
-  echo "✓ Commit y push realizados"
+  
+  if [ "$SKIP_GIT_PUSH" = "true" ]; then
+    echo "[i] Push skipped (ejecutándose en CI environment)"
+    echo "    El workflow de GitHub Actions hará el push después"
+  else
+    git push origin $(git rev-parse --abbrev-ref HEAD)
+    echo "✓ Commit y push realizados"
+  fi
 fi
 echo "::endgroup::"
 
