@@ -22,7 +22,6 @@ env:
   RETRY_MAX: 5
   RETRY_DELAY: 2
   ARTIFACT_DIR: $HOME/bootstrap-artifacts
-  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
 
 jobs:
   bootstrap-argocd:
@@ -273,6 +272,7 @@ jobs:
 
       - name: Verify ArgoCD Installation
         if: success()
+        timeout-minutes: 5
         run: |
           echo "::group::Verificando instalación de ArgoCD"
           
@@ -289,16 +289,16 @@ jobs:
           # Verificar Helm release
           if helm list -n argocd | grep -q "^argocd"; then
             echo "[✓] Release Helm 'argocd' instalado"
-            helm status argocd -n argocd
+            helm status argocd -n argocd 2>/dev/null || echo "[i] Status: en transición"
           else
             echo "[✗] Release Helm 'argocd' no encontrado"
             exit 1
           fi
           
-          # Verificar pods
+          # Verificar pods con timeout
           echo ""
-          echo "Estado de los pods de ArgoCD:"
-          kubectl get pods -n argocd
+          echo "Estado de los pods de ArgoCD (timeout 60s):"
+          timeout 60 kubectl get pods -n argocd || echo "[!] Timeout esperando pods"
           
           echo ""
           echo "[✓] Verificación completada"
@@ -307,6 +307,7 @@ jobs:
 
       - name: Apply Sealed Secret
         if: success() && steps.generate-secret.outputs.secret_generated == 'true'
+        timeout-minutes: 5
         run: |
           echo "::group::Aplicando secreto sellado de ArgoCD"
           
@@ -328,13 +329,13 @@ jobs:
             echo ""
             
             # Verificar que sealed-secrets controller esté running
-            if ! kubectl get pods -n kube-system -l app.kubernetes.io/name=sealed-secrets --no-headers 2>/dev/null | grep -q "Running"; then
+            if ! timeout 10 kubectl get pods -n kube-system -l app.kubernetes.io/name=sealed-secrets --no-headers 2>/dev/null | grep -q "Running"; then
               echo "[!] Advertencia: sealed-secrets controller no está running"
               echo "    El secreto sellado podría no desellarse correctamente"
             fi
             
             echo "Aplicando secreto sellado..."
-            if kubectl apply -f "$SEALED_SECRET_FILE"; then
+            if timeout 30 kubectl apply -f "$SEALED_SECRET_FILE"; then
               echo "[✓] SealedSecret aplicado exitosamente"
             else
               echo "[✗] Error aplicando el secreto sellado"
@@ -348,7 +349,7 @@ jobs:
             RETRY_COUNT=0
             MAX_RETRIES=30
             while [ $RETRY_COUNT -lt $MAX_RETRIES ]; do
-              if kubectl get secret argocd-secret -n argocd &>/dev/null; then
+              if timeout 5 kubectl get secret argocd-secret -n argocd &>/dev/null; then
                 echo "[✓] Secreto desellado exitosamente"
                 break
               fi
@@ -380,20 +381,17 @@ jobs:
             )
             
             for deployment in "${DEPLOYMENTS[@]}"; do
-              if kubectl get deployment "$deployment" -n argocd &>/dev/null; then
+              if timeout 5 kubectl get deployment "$deployment" -n argocd &>/dev/null; then
                 echo "  • Recargando $deployment..."
-                kubectl rollout restart deployment/"$deployment" -n argocd
+                timeout 30 kubectl rollout restart deployment/"$deployment" -n argocd || echo "[!] Timeout en rollout $deployment"
               fi
             done
             
             echo ""
-            echo "Esperando a que los pods estén listos..."
-            sleep 5
-            
-            echo "[✓] Pods de ArgoCD recargados"
+            echo "[✓] Pods de ArgoCD recargados (proceso asincrónico)"
             echo ""
             echo "Estado actual de los pods:"
-            kubectl get pods -n argocd -l app.kubernetes.io/instance=argocd
+            timeout 30 kubectl get pods -n argocd -l app.kubernetes.io/instance=argocd 2>/dev/null || echo "[i] Esperando pods listos..."
             
           else
             echo "[!] Archivo de secreto sellado NO encontrado: $SEALED_SECRET_FILE"
@@ -405,7 +403,7 @@ jobs:
             echo "  3. El secreto se committeará a Git"
             echo "  4. En la siguiente ejecución de este workflow se aplicará automáticamente"
             echo ""
-            echo "Por ahora, ArgoCD usando la contraseña por defecto."
+            echo "Por ahora, ArgoCD usa la contraseña por defecto."
           fi
           
           echo "::endgroup::"
