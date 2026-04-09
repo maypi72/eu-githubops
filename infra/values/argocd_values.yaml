@@ -1,17 +1,18 @@
-# Valores orientados a laboratorio en K3s.
-# Se prioriza simplicidad y bajo consumo de recursos.
+# Valores para ArgoCD v3.3.6 con chart Helm 9.4.17
+# Configuración orientada a laboratorio en K3s
+# Se prioriza simplicidad y bajo consumo de recursos
 
 global:
   domain: argocd.local
 
-configs:
-  # Permitir que ArgoCD cree el secret inicial
-  # Luego se reemplaza con el secreto sellado desde sealed-secrets
-  secret:
-    createSecret: true
+# Configuración de componentes
+configuration:
   params:
     server.insecure: true
+    server.disable.auth: false
+    application.instanceLabelKey: argocd.argoproj.io/instance
 
+# Deshabilitar componentes innecesarios para laboratorio
 dex:
   enabled: false
 

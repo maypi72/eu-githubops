@@ -1,8 +1,13 @@
-# Guía: Bootstrap de ArgoCD Integrado
+# Guía: Bootstrap de ArgoCD Integrado (v3.3.6)
 
 ## Resumen de Cambios
 
 Se ha integrado completamente la generación del SealedSecret en el workflow `bootstrap-argocd.yaml`. El script `gen_argocd_secret.sh` ahora se ejecuta automáticamente como parte del proceso de instalación.
+
+**Versión Actual:**
+- ArgoCD: **v3.3.6**
+- Helm Chart: **9.4.17**
+- Configuración optimizada para K3s en laboratorio
 
 ### Archivos Modificados
 
