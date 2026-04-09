@@ -328,6 +328,17 @@ jobs:
             echo "[✓] Archivo de secreto sellado encontrado: $SEALED_SECRET_FILE"
             echo ""
             
+            # IMPORTANTE: Eliminar el Secret anterior si existe (creado por Helm)
+            # Esto permite que SealedSecret lo recree correctamente
+            echo "Eliminando Secret anterior si existe (para que SealedSecret pueda recrearlo)..."
+            if kubectl get secret argocd-secret -n argocd &>/dev/null; then
+              echo "  [!] Secret encontrado, eliminando..."
+              timeout 10 kubectl delete secret argocd-secret -n argocd --wait=true 2>/dev/null || echo "  [i] Secret ya no existe o timeout"
+              sleep 2
+            else
+              echo "  [i] No hay Secret previo"
+            fi
+            
             # Verificar que sealed-secrets controller esté running
             if ! timeout 10 kubectl get pods -n kube-system -l app.kubernetes.io/name=sealed-secrets --no-headers 2>/dev/null | grep -q "Running"; then
               echo "[!] Advertencia: sealed-secrets controller no está running"
