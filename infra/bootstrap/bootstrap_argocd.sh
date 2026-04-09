@@ -4,7 +4,7 @@ IFS=$'\n\t'
 
 # Config
 ARGOCD_NAMESPACE="argocd"
-ARGOCD_CHART_VERSION="9.4.17"
+ARGOCD_CHART_VERSION="10.1.0"
 ARGOCD_VERSION="v3.3.6"
 HELM_REPO_NAME="argo"
 HELM_REPO_URL="https://argoproj.github.io/argo-helm"

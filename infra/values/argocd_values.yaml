@@ -1,4 +1,4 @@
-# Valores para ArgoCD v3.3.6 con chart Helm 9.4.17
+# Valores para ArgoCD v3.3.6 con chart Helm 10.1.0
 # Configuración orientada a laboratorio en K3s
 # Se prioriza simplicidad y bajo consumo de recursos
 
