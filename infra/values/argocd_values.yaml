@@ -13,21 +13,19 @@ configs:
     url: https://argocd.local
     admin.enabled: true
 
-  # ESTE ES EL CM CLAVE PARA LOS FLAGS DE ARRANQUE
-  # genera argocd-cmd-params-cm
-  cmdParams:
+  # ESTE ES EL CM QUE GENERA argocd-cmd-params-cm
+  params:
     # UI / API sin TLS interno
     server.insecure: "true"
 
-    # FUNDAMENTAL: desactivar TLS interno del repo-server
+    # DESACTIVAR TLS INTERNO DEL REPO-SERVER
     reposerver.disable.tls: "true"
+
+    # Instance label key
+    application.instanceLabelKey: argocd.argoproj.io/instance
 
     # Opcional pero recomendable
     applicationSetController.enable.progressive.syncs: "true"
-
-configuration:
-  params:
-    application.instanceLabelKey: argocd.argoproj.io/instance
 
 dex:
   enabled: false
@@ -63,7 +61,6 @@ server:
     ingressClassName: nginx
     annotations:
       cert-manager.io/cluster-issuer: mygitops-ca
-      # nginx habla HTTP con el pod
       nginx.ingress.kubernetes.io/backend-protocol: "HTTP"
     hosts:
       - argocd.local
@@ -77,8 +74,8 @@ server:
 
 repoServer:
   replicas: 1
-  # el chart 9.5.0 IGNORA repoServer.livenessProbe/readinessProbe
-  # dejar los defaults (funcionan cuando TLS está desactivado)
+  # El chart 9.5.0 ignora repoServer.livenessProbe/readinessProbe
+  # Se usan los defaults (funcionan cuando TLS está desactivado)
 
   resources:
     requests:
