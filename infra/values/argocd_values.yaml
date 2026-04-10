@@ -1,5 +1,5 @@
-# Valores corregidos para ArgoCD v3.3.6 / Helm Chart 9.5.0
-# Entorno: K3s + Calico (sin Traefik/Flannel)
+# Argo CD v3.3.6 – Helm chart 9.5.0
+# k3s + Calico – TLS solo en Ingress
 
 global:
   domain: argocd.local
@@ -8,10 +8,16 @@ configs:
   cm:
     url: https://argocd.local
     admin.enabled: true
-  # IMPORTANTE: Forzamos al repo-server en el puerto gRPC 8081
+
   params:
-    reposerver: "argocd-repo-server:8081"
-    server.insecure: true # Ingress ya gestiona TLS (terminación SSL)
+    # UI / API sin TLS interno (Ingress se encarga)
+    server.insecure: true
+
+    # 🔴 CLAVE: desactivar TLS interno del repo-server
+    reposerver.disable.tls: "true"
+
+    # Opcional pero recomendable para entornos pequeños
+    applicationsetcontroller.enable.progressive.syncs: "true"
 
 configuration:
   params:
@@ -42,14 +48,15 @@ server:
     limits:
       cpu: 300m
       memory: 256Mi
+
   service:
     type: ClusterIP
+
   ingress:
     enabled: true
     ingressClassName: nginx
     annotations:
-      cert-manager.io/cluster-issuer: "mygitops-ca"
-      # Nginx hablará con el pod por HTTP (insecure) y Nginx pondrá el certificado TLS
+      cert-manager.io/cluster-issuer: mygitops-ca
       nginx.ingress.kubernetes.io/backend-protocol: "HTTP"
     hosts:
       - argocd.local
@@ -63,19 +70,24 @@ server:
 
 repoServer:
   replicas: 1
-  # El puerto de salud por defecto en esta versión es el 8084
+
+  # Probes HTTP estándar (vuelven a funcionar al quitar TLS)
   livenessProbe:
     enabled: true
     initialDelaySeconds: 15
     periodSeconds: 10
-    tcpSocket:
-      port: 8081 # Usamos TCP en el puerto gRPC para asegurar conectividad básica
+    httpGet:
+      path: /healthz?full=true
+      port: 8084
+
   readinessProbe:
     enabled: true
     initialDelaySeconds: 5
     periodSeconds: 10
-    tcpSocket:
-      port: 8081
+    httpGet:
+      path: /healthz
+      port: 8084
+
   resources:
     requests:
       cpu: 150m
