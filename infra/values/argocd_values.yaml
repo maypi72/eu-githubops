@@ -1,23 +1,26 @@
-# Argo CD v3.3.6
-# Helm chart 9.5.0
-# k3s + Calico
-# TLS terminado en Ingress (nginx)
-# repo-server SIN TLS interno
+# Argo CD v2.10 (Helm chart 9.5.0)
+# k3s + Calico + Ingress-Nginx
+# Escenario: TLS Termination en Ingress (Cert-Manager) y comunicación interna HTTP
 
 global:
   domain: argocd.local
 
 configs:
+  # Configuración general de la UI y comportamiento
   cm:
     url: https://argocd.local
     admin.enabled: true
     application.instanceLabelKey: argocd.argoproj.io/instance
     applicationSetController.enable.progressive.syncs: "true"
 
+  # PARÁMETROS CENTRALIZADOS (Equivalente a variables de entorno)
   params:
-    # UI / API sin TLS interno
+    # 1. El servidor (API/UI) escucha en HTTP (puerto 8080)
     server.insecure: "true"
-    # ⚠️ OJO: NO existe reposerver.disable.tls en este chart → eliminado
+    # 2. Deshabilita TLS en el proceso repo-server (ARGOCD_REPO_SERVER_DISABLE_TLS)
+    reposerver.disable.tls: "true"
+    # 3. Indica a Controller y Server que hablen con Repo Server por HTTP (puerto 8081)
+    repo.server.plaintext: "true"
 
 dex:
   enabled: false
@@ -27,8 +30,6 @@ redis:
 
 controller:
   replicas: 1
-  extraArgs:
-    - --repo-server-plaintext
   resources:
     requests:
       cpu: 150m
@@ -39,8 +40,6 @@ controller:
 
 server:
   replicas: 1
-  extraArgs:
-    - --repo-server-plaintext
   resources:
     requests:
       cpu: 50m
@@ -57,7 +56,13 @@ server:
     ingressClassName: nginx
     annotations:
       cert-manager.io/cluster-issuer: mygitops-ca
+      # El Ingress habla HTTP con el Pod de Argo (porque server.insecure: "true")
       nginx.ingress.kubernetes.io/backend-protocol: "HTTP"
+      # Forzamos HTTPS en el navegador
+      nginx.ingress.kubernetes.io/ssl-redirect: "true"
+      # Configuración para evitar timeouts en logs o terminal de Argo
+      nginx.ingress.kubernetes.io/proxy-read-timeout: "3600"
+      nginx.ingress.kubernetes.io/proxy-send-timeout: "3600"
     hosts:
       - argocd.local
     paths:
@@ -70,8 +75,7 @@ server:
 
 repoServer:
   replicas: 1
-  extraArgs:
-    - --disable-tls
+  # Ya no necesita extraArgs porque lo hereda de configs.params
   resources:
     requests:
       cpu: 300m
