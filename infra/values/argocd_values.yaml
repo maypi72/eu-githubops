@@ -1,26 +1,25 @@
-# Argo CD v2.10 (Helm chart 9.5.0)
-# k3s + Calico + Ingress-Nginx
+# Argo CD v3.3.6 (Bleeding Edge)
+# Helm chart 9.5.0
 # Escenario: TLS Termination en Ingress (Cert-Manager) y comunicación interna HTTP
 
 global:
   domain: argocd.local
 
 configs:
-  # Configuración general de la UI y comportamiento
   cm:
     url: https://argocd.local
     admin.enabled: true
     application.instanceLabelKey: argocd.argoproj.io/instance
     applicationSetController.enable.progressive.syncs: "true"
 
-  # PARÁMETROS CENTRALIZADOS (Equivalente a variables de entorno)
+  # En v3.x, los parámetros se mapean así en el ConfigMap central
   params:
-    # 1. El servidor (API/UI) escucha en HTTP (puerto 8080)
-    server.insecure: "true"
-    # 2. Deshabilita TLS en el proceso repo-server (ARGOCD_REPO_SERVER_DISABLE_TLS)
+    # Desactiva TLS en el binario repo-server
     reposerver.disable.tls: "true"
-    # 3. Indica a Controller y Server que hablen con Repo Server por HTTP (puerto 8081)
+    # Indica a los clientes (server/controller) que usen HTTP para conectar al repo-server
     repo.server.plaintext: "true"
+    # El servidor API/UI escucha en HTTP puro (para el Ingress)
+    server.insecure: "true"
 
 dex:
   enabled: false
@@ -31,23 +30,11 @@ redis:
 controller:
   replicas: 1
   resources:
-    requests:
-      cpu: 150m
-      memory: 250Mi
-    limits:
-      cpu: 500m
-      memory: 760Mi
+    requests: { cpu: 150m, memory: 250Mi }
+    limits: { cpu: 500m, memory: 760Mi }
 
 server:
   replicas: 1
-  resources:
-    requests:
-      cpu: 50m
-      memory: 128Mi
-    limits:
-      cpu: 300m
-      memory: 256Mi
-
   service:
     type: ClusterIP
 
@@ -56,13 +43,13 @@ server:
     ingressClassName: nginx
     annotations:
       cert-manager.io/cluster-issuer: mygitops-ca
-      # El Ingress habla HTTP con el Pod de Argo (porque server.insecure: "true")
+      # IMPORTANTE: Como server.insecure es "true", el backend es HTTP
       nginx.ingress.kubernetes.io/backend-protocol: "HTTP"
-      # Forzamos HTTPS en el navegador
+      # Forzar redirección a HTTPS en el navegador
       nginx.ingress.kubernetes.io/ssl-redirect: "true"
-      # Configuración para evitar timeouts en logs o terminal de Argo
-      nginx.ingress.kubernetes.io/proxy-read-timeout: "3600"
-      nginx.ingress.kubernetes.io/proxy-send-timeout: "3600"
+      # Soporte para gRPC (CLI de Argo CD)
+      nginx.ingress.kubernetes.io/proxy-body-size: "0"
+      nginx.ingress.kubernetes.io/proxy-read-timeout: "600"
     hosts:
       - argocd.local
     paths:
@@ -75,14 +62,10 @@ server:
 
 repoServer:
   replicas: 1
-  # Ya no necesita extraArgs porque lo hereda de configs.params
+  # En v3.3.6, repoServer lee automáticamente de configs.params
   resources:
-    requests:
-      cpu: 300m
-      memory: 256Mi
-    limits:
-      cpu: 1000m
-      memory: 512Mi
+    requests: { cpu: 300m, memory: 256Mi }
+    limits: { cpu: 1000m, memory: 512Mi }
 
 applicationSet:
   replicas: 1
