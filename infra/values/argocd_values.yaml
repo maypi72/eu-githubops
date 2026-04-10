@@ -1,23 +1,29 @@
-# Argo CD v3.3.6 – Helm chart 9.5.0
-# k3s + Calico – TLS solo en Ingress
+# Argo CD v3.3.6
+# Helm chart 9.5.0
+# k3s + Calico
+# TLS terminado en Ingress (nginx)
+# repo-server SIN TLS interno
 
 global:
   domain: argocd.local
 
 configs:
+  # argocd-cm
   cm:
     url: https://argocd.local
     admin.enabled: true
 
-  params:
-    # UI / API sin TLS interno (Ingress se encarga)
-    server.insecure: true
+  # ESTE ES EL CM CLAVE PARA LOS FLAGS DE ARRANQUE
+  # genera argocd-cmd-params-cm
+  cmdParams:
+    # UI / API sin TLS interno
+    server.insecure: "true"
 
-    # 🔴 CLAVE: desactivar TLS interno del repo-server
+    # FUNDAMENTAL: desactivar TLS interno del repo-server
     reposerver.disable.tls: "true"
 
-    # Opcional pero recomendable para entornos pequeños
-    applicationsetcontroller.enable.progressive.syncs: "true"
+    # Opcional pero recomendable
+    applicationSetController.enable.progressive.syncs: "true"
 
 configuration:
   params:
@@ -57,6 +63,7 @@ server:
     ingressClassName: nginx
     annotations:
       cert-manager.io/cluster-issuer: mygitops-ca
+      # nginx habla HTTP con el pod
       nginx.ingress.kubernetes.io/backend-protocol: "HTTP"
     hosts:
       - argocd.local
@@ -70,23 +77,8 @@ server:
 
 repoServer:
   replicas: 1
-
-  # Probes HTTP estándar (vuelven a funcionar al quitar TLS)
-  livenessProbe:
-    enabled: true
-    initialDelaySeconds: 15
-    periodSeconds: 10
-    httpGet:
-      path: /healthz?full=true
-      port: 8084
-
-  readinessProbe:
-    enabled: true
-    initialDelaySeconds: 5
-    periodSeconds: 10
-    httpGet:
-      path: /healthz
-      port: 8084
+  # el chart 9.5.0 IGNORA repoServer.livenessProbe/readinessProbe
+  # dejar los defaults (funcionan cuando TLS está desactivado)
 
   resources:
     requests:
