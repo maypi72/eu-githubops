@@ -8,24 +8,16 @@ global:
   domain: argocd.local
 
 configs:
-  # argocd-cm
   cm:
     url: https://argocd.local
     admin.enabled: true
+    application.instanceLabelKey: argocd.argoproj.io/instance
+    applicationSetController.enable.progressive.syncs: "true"
 
-  # ESTE ES EL CM QUE GENERA argocd-cmd-params-cm
   params:
     # UI / API sin TLS interno
     server.insecure: "true"
-
-    # DESACTIVAR TLS INTERNO DEL REPO-SERVER
-    reposerver.disable.tls: "true"
-
-    # Instance label key
-    application.instanceLabelKey: argocd.argoproj.io/instance
-
-    # Opcional pero recomendable
-    applicationSetController.enable.progressive.syncs: "true"
+    # ⚠️ OJO: NO existe reposerver.disable.tls en este chart → eliminado
 
 dex:
   enabled: false
@@ -35,6 +27,8 @@ redis:
 
 controller:
   replicas: 1
+  extraArgs:
+    - --repo-server-plaintext
   resources:
     requests:
       cpu: 150m
@@ -45,6 +39,8 @@ controller:
 
 server:
   replicas: 1
+  extraArgs:
+    - --repo-server-plaintext
   resources:
     requests:
       cpu: 50m
@@ -74,9 +70,8 @@ server:
 
 repoServer:
   replicas: 1
-  # El chart 9.5.0 ignora repoServer.livenessProbe/readinessProbe
-  # Se usan los defaults (funcionan cuando TLS está desactivado)
-
+  extraArgs:
+    - --disable-tls
   resources:
     requests:
       cpu: 300m
