@@ -12,13 +12,9 @@ configs:
     application.instanceLabelKey: argocd.argoproj.io/instance
     applicationSetController.enable.progressive.syncs: "true"
 
-  # En v3.x, los parámetros se mapean así en el ConfigMap central
   params:
-    # Desactiva TLS en el binario repo-server
     reposerver.disable.tls: "true"
-    # Indica a los clientes (server/controller) que usen HTTP para conectar al repo-server
     repo.server.plaintext: "true"
-    # El servidor API/UI escucha en HTTP puro (para el Ingress)
     server.insecure: "true"
 
 dex:
@@ -43,11 +39,8 @@ server:
     ingressClassName: nginx
     annotations:
       cert-manager.io/cluster-issuer: mygitops-ca
-      # IMPORTANTE: Como server.insecure es "true", el backend es HTTP
       nginx.ingress.kubernetes.io/backend-protocol: "HTTP"
-      # Forzar redirección a HTTPS en el navegador
       nginx.ingress.kubernetes.io/ssl-redirect: "true"
-      # Soporte para gRPC (CLI de Argo CD)
       nginx.ingress.kubernetes.io/proxy-body-size: "0"
       nginx.ingress.kubernetes.io/proxy-read-timeout: "600"
     hosts:
@@ -62,10 +55,47 @@ server:
 
 repoServer:
   replicas: 1
-  # En v3.3.6, repoServer lee automáticamente de configs.params
   resources:
     requests: { cpu: 300m, memory: 256Mi }
     limits: { cpu: 1000m, memory: 512Mi }
+
+  # Forzar que el repo-server escuche en todas las interfaces y exponer puertos esperados
+  extraArgs:
+    - --address=0.0.0.0
+    - --port=8081
+    - --metrics-address=0.0.0.0
+    - --metrics-port=8084
+
+  # Probes alineadas con gRPC: comprobación TCP sobre el puerto gRPC 8081
+  livenessProbe:
+    tcpSocket:
+      port: 8081
+    initialDelaySeconds: 60
+    timeoutSeconds: 5
+    periodSeconds: 15
+    failureThreshold: 6
+
+  readinessProbe:
+    tcpSocket:
+      port: 8081
+    initialDelaySeconds: 30
+    timeoutSeconds: 5
+    periodSeconds: 10
+    failureThreshold: 3
+
+  # Alternativa (más precisa): exec probe usando grpc_health_probe
+  # Requiere incluir el binario grpc_health_probe en la imagen o montarlo en el contenedor.
+  # Descomenta y ajusta si decides usar exec probe.
+  # livenessProbe:
+  #   exec:
+  #     command:
+  #       - /bin/grpc_health_probe
+  #       - -addr=:8081
+  #       - -rpc-timeout=5s
+  #   initialDelaySeconds: 60
+  #   timeoutSeconds: 10
+  #   periodSeconds: 15
+  #   failureThreshold: 6
 
 applicationSet:
   replicas: 1
