@@ -1,4 +1,4 @@
-# Argo CD v3.3.6 (Bleeding Edge)
+#Argo CD v3.3.6
 # Helm chart 9.5.0
 # Escenario: TLS Termination en Ingress (Cert-Manager) y comunicación interna HTTP
 
@@ -9,8 +9,6 @@ configs:
   cm:
     url: https://argocd.local
     admin.enabled: true
-    application.instanceLabelKey: argocd.argoproj.io/instance
-    applicationSetController.enable.progressive.syncs: "true"
 
   params:
     reposerver.disable.tls: "true"
@@ -59,43 +57,31 @@ repoServer:
     requests: { cpu: 300m, memory: 256Mi }
     limits: { cpu: 1000m, memory: 512Mi }
 
-  # Forzar que el repo-server escuche en todas las interfaces y exponer puertos esperados
   extraArgs:
-    - --address=0.0.0.0
-    - --port=8081
-    - --metrics-address=0.0.0.0
-    - --metrics-port=8084
+    - --dissable-tls=true
 
-  # Probes alineadas con gRPC: comprobación TCP sobre el puerto gRPC 8081
+  env:
+    - name: ARGOCD_REPO_SERVER_PLAINTEXT
+      value: "true"
+    - name: ARGOCD_REPO_SERVER_DISABLE_TLS
+      value: "true"
+
   livenessProbe:
-    tcpSocket:
-      port: 8081
-    initialDelaySeconds: 60
-    timeoutSeconds: 5
-    periodSeconds: 15
-    failureThreshold: 6
-
-  readinessProbe:
-    tcpSocket:
-      port: 8081
+    httpGet:
+      path: /healthz?full=true
+      port: metrics
     initialDelaySeconds: 30
-    timeoutSeconds: 5
-    periodSeconds: 10
-    failureThreshold: 3
-
-  # Alternativa (más precisa): exec probe usando grpc_health_probe
-  # Requiere incluir el binario grpc_health_probe en la imagen o montarlo en el contenedor.
-  # Descomenta y ajusta si decides usar exec probe.
-  # livenessProbe:
-  #   exec:
-  #     command:
-  #       - /bin/grpc_health_probe
-  #       - -addr=:8081
-  #       - -rpc-timeout=5s
-  #   initialDelaySeconds: 60
-  #   timeoutSeconds: 10
-  #   periodSeconds: 15
-  #   failureThreshold: 6
+    timeoutSeconds: 10
+    periodSeconds: 15
+    failureThreshold: 5
+  readinessProbe:
+    httpGet:
+      path: /healthz
+      port: metrics
+    initialDelaySeconds: 30
+    timeoutSeconds: 10
+    periodSeconds: 15
+    failureThreshold: 5
 
 applicationSet:
   replicas: 1
