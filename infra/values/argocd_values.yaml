@@ -58,7 +58,7 @@ repoServer:
     limits: { cpu: 1000m, memory: 512Mi }
 
   extraArgs:
-    - --dissable-tls=true
+    - --disable-tls=true
 
   env:
     - name: ARGOCD_REPO_SERVER_PLAINTEXT
