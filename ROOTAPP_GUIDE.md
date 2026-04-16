@@ -4,7 +4,7 @@
 
 La **Root Platform** es el punto de entrada completo para que **ArgoCD** gestione toda la plataforma. Consiste en:
 
-1. **ArgoCD Project** (`platfrom_proyect.yaml`): Define el proyecto y permisos para ArgoCD
+1. **ArgoCD Project** (`platform_proyect.yaml`): Define el proyecto y permisos para ArgoCD
 2. **Root Application** (`root-platform.yaml`): La aplicación raíz que sincroniza todo
 
 Una vez aplicados, ArgoCD sincronizará automáticamente todos los componentes y aplicaciones definidas en el repositorio.
@@ -19,7 +19,7 @@ Antes de aplicar la Root Platform, debes haber completado:
 2. ✓ **Helm**: Instalado en el cluster
 3. ✓ **ArgoCD**: Instalado en el namespace `argocd` (ejecutar `bootstrap-argocd.yml`)
 4. ✓ **Archivos**: 
-   - `argocd-proyects/platfrom_proyect.yaml` debe existir
+   - `argocd-proyects/platform_proyect.yaml` debe existir
    - `platform/root-platform.yaml` debe existir
 
 ## Métodos de Aplicación
@@ -43,7 +43,7 @@ cd /path/to/eu-githubops
 - ✓ Comprueba que el namespace `argocd` existe
 - ✓ Comprueba que ArgoCD está instalado
 - ✓ Valida que ambos archivos YAML existen:
-  - `argocd-proyects/platfrom_proyect.yaml`
+  - `argocd-proyects/platform_proyect.yaml`
   - `platform/root-platform.yaml`
 - ✓ **Primero**: Aplica el ArgoCD Project
 - ✓ **Luego**: Aplica la Root Application
@@ -63,7 +63,7 @@ cd /path/to/eu-githubops
 [✓] Cluster Kubernetes accesible
 [✓] Namespace 'argocd' existe
 [✓] ArgoCD está instalado en 'argocd'
-[✓] Archivo encontrado: argocd-proyects/platfrom_proyect.yaml
+[✓] Archivo encontrado: argocd-proyects/platform_proyect.yaml
 [✓] Archivo encontrado: platform/root-platform.yaml
 ...
 [✓] ArgoCD Project aplicado correctamente
@@ -94,7 +94,7 @@ Si el cluster está configurado como `self-hosted` runner en GitHub:
 
 ## Contenido de los Archivos YAML
 
-### 1. ArgoCD Project (`argocd-proyects/platfrom_proyect.yaml`)
+### 1. ArgoCD Project (`argocd-proyects/platform_proyect.yaml`)
 
 Define el proyecto de ArgoCD y sus permisos:
 
@@ -214,7 +214,7 @@ kubectl wait --for=condition=available --timeout=300s deployment/argocd-server -
 
 ### Archivos YAML no encontrados
 
-**Problema**: Error "platform/root-platform.yaml no encontrado" o "argocd-proyects/platfrom_proyect.yaml no encontrado"
+**Problema**: Error "platform/root-platform.yaml no encontrado" o "argocd-proyects/platform_proyect.yaml no encontrado"
 
 **Solución**:
 1. Crear los archivos YAML:
@@ -222,7 +222,7 @@ kubectl wait --for=condition=available --timeout=300s deployment/argocd-server -
    mkdir -p platform
    mkdir -p argocd-proyects
    # Crear platform/root-platform.yaml con contenido correcto
-   # Crear argocd-proyects/platfrom_proyect.yaml con contenido correcto
+   # Crear argocd-proyects/platform_proyect.yaml con contenido correcto
    ```
 2. Commitear y verificar que están en el repositorio
 3. Ejecutar nuevamente el script
@@ -238,7 +238,7 @@ kubectl wait --for=condition=available --timeout=300s deployment/argocd-server -
   ```
 - Comprobar si hay errores de validación YAML:
   ```bash
-  kubectl apply -f argocd-proyects/platfrom_proyect.yaml --dry-run=client -v=9
+  kubectl apply -f argocd-proyects/platform_proyect.yaml --dry-run=client -v=9
   kubectl apply -f platform/root-platform.yaml --dry-run=client -v=9
   ```
 - Verificar que el Project existe antes que la Application:
@@ -320,7 +320,7 @@ La Application está correctamente aplicada cuando:
 
 - 📄 `scripts/gen_root_plat.sh` - Script de aplicación manual
 - 🔧 `.github/workflows/apply_rootplat.yaml` - Workflow de GitHub Actions
-- 📋 `argocd-proyects/platfrom_proyect.yaml` - Manifiesto del ArgoCD Project
+- 📋 `argocd-proyects/platform_proyect.yaml` - Manifiesto del ArgoCD Project
 - 📋 `platform/root-platform.yaml` - Manifiesto de la Root Application
 - 📖 `BOOTSTRAP_ARGOCD_GUIDE.md` - Cómo instalar ArgoCD
 - 📖 `README.md` - Resumen general del proyecto

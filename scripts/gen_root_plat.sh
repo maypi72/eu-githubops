@@ -11,9 +11,9 @@ IFS=$'\n\t'
 
 # Configuración
 NAMESPACE="argocd"
-PROJECT_NAME="platform-project"
+PROJECT_NAME="platform-proyect"
 ROOT_APP_NAME="platform-root"
-PROJECTS_FILE="argocd-proyects/platfrom_proyect.yaml"
+PROJECTS_FILE="argocd-projects/platform_proyect.yaml"
 ROOT_APP_FILE="platform/root-platform.yaml"
 
 # Obtener directorio del script

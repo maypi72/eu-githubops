@@ -5,7 +5,7 @@ name: Apply Root Platform
 # ORDEN: Primero Project, luego Root Application
 # REQUISITO: 
 #   - ArgoCD debe estar instalado en el cluster (ejecutar bootstrap-argocd.yml primero)
-#   - El archivo argocd-proyects/platfrom_proyect.yaml debe existir
+#   - El archivo argocd-proyects/platform_proyect.yaml debe existir
 #   - El archivo platform/root-platform.yaml debe existir
 on:
   workflow_dispatch:
@@ -151,10 +151,10 @@ jobs:
           
           # Verificar archivo del Project de ArgoCD
           echo "[INFO] Verificando archivo del Project..."
-          if [ -f "argocd-proyects/platfrom_proyect.yaml" ]; then
-            echo "[✓] Archivo encontrado: argocd-proyects/platfrom_proyect.yaml"
+          if [ -f "argocd-proyects/platform_proyect.yaml" ]; then
+            echo "[✓] Archivo encontrado: argocd-proyects/platform_proyect.yaml"
           else
-            echo "[✗] ERROR: Archivo no encontrado: argocd-proyects/platfrom_proyect.yaml"
+            echo "[✗] ERROR: Archivo no encontrado: argocd-proyects/platform_proyect.yaml"
             exit 1
           fi
           
@@ -175,11 +175,11 @@ jobs:
           echo "::group::Validando manifiestos YAML"
           
           echo "[INFO] Validando Project manifest..."
-          if kubectl apply -f argocd-proyects/platfrom_proyect.yaml --dry-run=client -n argocd >/dev/null 2>&1; then
+          if kubectl apply -f argocd-proyects/platform_proyect.yaml --dry-run=client -n argocd >/dev/null 2>&1; then
             echo "[✓] Project YAML válido"
           else
             echo "[✗] ERROR: Project YAML inválido"
-            kubectl apply -f argocd-proyects/platfrom_proyect.yaml --dry-run=client -n argocd
+            kubectl apply -f argocd-proyects/platform_proyect.yaml --dry-run=client -n argocd
             exit 1
           fi
           
@@ -195,7 +195,7 @@ jobs:
           echo "[INFO] Contenido del manifiestos (primeras 50 líneas):"
           echo ""
           echo "--- Project ---"
-          kubectl apply -f argocd-proyects/platfrom_proyect.yaml --dry-run=client -n argocd -o yaml | head -30
+          kubectl apply -f argocd-proyects/platform_proyect.yaml --dry-run=client -n argocd -o yaml | head -30
           echo "..."
           echo ""
           echo "--- Root Application ---"
@@ -256,8 +256,8 @@ jobs:
           PROJECT_NAME="platform-project"
           NAMESPACE="argocd"
           
-          echo "[INFO] Aplicando Project: argocd-proyects/platfrom_proyect.yaml"
-          kubectl apply -f argocd-proyects/platfrom_proyect.yaml -n "$NAMESPACE"
+          echo "[INFO] Aplicando Project: argocd-proyects/platform_proyect.yaml"
+          kubectl apply -f argocd-proyects/platform_proyect.yaml -n "$NAMESPACE"
           
           echo ""
           echo "[INFO] Esperando a que Project se registre en ArgoCD..."
@@ -357,7 +357,7 @@ jobs:
           echo "::group::Verificación (Dry Run)"
           
           echo "[INFO] Ejecutando dry-run del Project..."
-          kubectl apply -f argocd-proyects/platfrom_proyect.yaml --dry-run=client -n argocd -o yaml
+          kubectl apply -f argocd-proyects/platform_proyect.yaml --dry-run=client -n argocd -o yaml
           
           echo ""
           echo "[INFO] Ejecutando dry-run de la Root Application..."
