@@ -32,10 +32,10 @@ dashboard:
     annotations:
       cert-manager.io/cluster-issuer: "mygitops-ca"
     hosts:
-      - host: rollouts.local.dev
+      - host: rollouts.local
         paths:
           - /
     tls:
       - secretName: rollouts-dashboard-tls
         hosts:
-          - rollouts.local.dev
+          - rollouts.local
