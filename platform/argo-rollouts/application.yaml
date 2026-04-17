@@ -1,0 +1,18 @@
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: argo-rollouts
+  namespace: argocd
+spec:
+  project: platform-project
+  source:
+    repoURL: https://github.com/maypi72/eu-githubops
+    targetRevision: main
+    path: platform/argo-rollouts/argo-rollouts-app
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: argo-rollouts
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
