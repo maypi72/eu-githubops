@@ -80,6 +80,8 @@ echo "✓ Hash bcrypt generado"
 echo "::endgroup::"
 
 echo "::group::Creando Secret local"
+# Generar una clave de servidor aleatoria
+SERVER_SECRET_KEY=$(openssl rand -base64 32)
 cat <<EOF > "${OUT_DIR}/${SECRET_NAME}.raw.yaml"
 apiVersion: v1
 kind: Secret
@@ -91,9 +93,10 @@ metadata:
 type: Opaque
 data:
   admin.password: $(echo -n "$htpasswd" | base64 -w0)
-  admin.passwordMtime: $(date +%s | base64 -w0)
+  admin.passwordMtime: $(date -u +"%Y-%m-%dT%H:%M:%SZ" | base64 -w0)
+  server.secretkey: $(echo -n "$SERVER_SECRET_KEY" | base64 -w0)
 EOF
-echo "✓ Secret creado en ${OUT_DIR}/${SECRET_NAME}.raw.yaml"
+echo "✓ Secret creado con en ${OUT_DIR}/${SECRET_NAME}.raw.yaml"
 echo "::endgroup::"
 
 echo "::group::Sellando Secret con kubeseal (usando clave pública)"
