@@ -4,7 +4,7 @@ metadata:
   name: platform-root
   namespace: argocd
 spec:
-  project: platform
+  project: platform-project
   source:
     repoURL: https://github.com/maypi72/eu-githubops.git
     targetRevision: main
