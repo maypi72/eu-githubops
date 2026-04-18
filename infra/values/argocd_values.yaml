@@ -32,6 +32,8 @@ server:
   replicas: 1
   service:
     type: ClusterIP
+  extraArgs:
+    - --repo-server-plaintext
   ingress:
     enabled: true
     ingressClassName: nginx
@@ -77,6 +79,9 @@ repoServer:
 
 applicationSet:
   replicas: 1
+  extraArgs:
+    - --disable-tls
+    - --repo-server-plaintext
 
 notifications:
   enabled: false
