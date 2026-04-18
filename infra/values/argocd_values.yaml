@@ -1,7 +1,4 @@
-#Argo CD v3.3.6
-# Helm chart 9.5.0
-# Escenario: TLS Termination en Ingress (Cert-Manager) y comunicación interna HTTP
-
+# Argo CD v3.3.6 | Helm chart 9.5.0
 global:
   domain: argocd.local
 
@@ -10,10 +7,10 @@ configs:
     url: https://argocd.local
     admin.enabled: true
 
+  # Esta es la sección clave para deshabilitar TLS internamente
   params:
-    reposerver.disable.tls: "true"
-    repo.server.plaintext: "true"
     server.insecure: "true"
+    repo.server.plaintext: "true"
 
 dex:
   enabled: false
@@ -26,12 +23,15 @@ controller:
   resources:
     requests: { cpu: 150m, memory: 250Mi }
     limits: { cpu: 500m, memory: 760Mi }
+  # Forzamos al controller a usar plaintext para evitar el ComparisonError
+  env:
+    - name: ARGOCD_REPO_SERVER_PLAINTEXT
+      value: "true"
 
 server:
   replicas: 1
   service:
     type: ClusterIP
-
   ingress:
     enabled: true
     ingressClassName: nginx
@@ -56,32 +56,24 @@ repoServer:
   resources:
     requests: { cpu: 300m, memory: 256Mi }
     limits: { cpu: 1000m, memory: 512Mi }
-
+  
+  # Simplificado: el flag correcto es --disable-tls
   extraArgs:
-    - --disable-tls=true
+    - --disable-tls
 
-  env:
-    - name: ARGOCD_REPO_SERVER_PLAINTEXT
-      value: "true"
-    - name: ARGOCD_REPO_SERVER_DISABLE_TLS
-      value: "true"
-
+  # Sondas corregidas al puerto 8081 (donde escucha el servicio gRPC sin TLS)
   livenessProbe:
     httpGet:
       path: /healthz?full=true
-      port: metrics
+      port: 8081
     initialDelaySeconds: 30
     timeoutSeconds: 10
-    periodSeconds: 15
-    failureThreshold: 5
   readinessProbe:
     httpGet:
       path: /healthz
-      port: metrics
+      port: 8081
     initialDelaySeconds: 30
     timeoutSeconds: 10
-    periodSeconds: 15
-    failureThreshold: 5
 
 applicationSet:
   replicas: 1
