@@ -32,8 +32,6 @@ server:
   replicas: 1
   service:
     type: ClusterIP
-  extraArgs:
-    - --repo-server-plaintext
   ingress:
     enabled: true
     ingressClassName: nginx
