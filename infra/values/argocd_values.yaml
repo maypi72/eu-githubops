@@ -79,8 +79,6 @@ repoServer:
 
 applicationSet:
   replicas: 1
-  extraArgs:
-    - --repo-server-plaintext
 
 notifications:
   enabled: false
