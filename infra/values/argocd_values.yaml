@@ -62,6 +62,7 @@ repoServer:
   # Simplificado: el flag correcto es --disable-tls
   extraArgs:
     - --disable-tls
+    - --enable-helm
 
   # Sondas corregidas al puerto 8081 (donde escucha el servicio gRPC sin TLS)
   livenessProbe:
