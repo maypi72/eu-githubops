@@ -8,7 +8,7 @@ spec:
   source:
     repoURL: https://github.com/maypi72/eu-githubops
     targetRevision: main
-    path: platform/argo-rollouts/argo-rollouts-app
+    path: platform/apps/argo-rollouts/argo-rollouts-app
   destination:
     server: https://kubernetes.default.svc
     namespace: argo-rollouts
