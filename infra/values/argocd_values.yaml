@@ -27,6 +27,8 @@ controller:
   env:
     - name: ARGOCD_REPO_SERVER_PLAINTEXT
       value: "true"
+  extraArgs:
+    - --repo-server-plaintext
 
 server:
   replicas: 1
