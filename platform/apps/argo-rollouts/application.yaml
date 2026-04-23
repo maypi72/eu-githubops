@@ -5,13 +5,26 @@ metadata:
   namespace: argocd
 spec:
   project: platform-project
+
   source:
     repoURL: https://github.com/maypi72/eu-githubops
     targetRevision: main
-    path: platform/apps/argo-rollouts/argo-rollouts-app
+    path: platform/apps/argo-rollouts
+
+    helm:
+      chart: argo-rollouts
+      repoURL: https://argoproj.github.io/argo-helm
+      targetRevision: 2.40.9
+
+      valueFiles:
+        - values.yaml
+
+      releaseName: argo-rollouts
+
   destination:
     server: https://kubernetes.default.svc
     namespace: argo-rollouts
+
   syncPolicy:
     automated:
       prune: true

@@ -58,8 +58,7 @@ repoServer:
   resources:
     requests: { cpu: 300m, memory: 256Mi }
     limits: { cpu: 1000m, memory: 512Mi }
-  
-  # Simplificado: el flag correcto es --disable-tls
+
   extraArgs:
     - --disable-tls
     - --enable-helm

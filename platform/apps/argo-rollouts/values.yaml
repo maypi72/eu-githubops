@@ -1,0 +1,68 @@
+# Configuración del controlador de Rollouts
+controller:
+  replicas: 2
+  
+  serviceAccount:
+    create: true
+    name: argo-rollouts
+  
+  # Recursos para el controlador
+  resources:
+    requests:
+      cpu: 100m
+      memory: 128Mi
+    limits:
+      cpu: 500m
+      memory: 512Mi
+  
+  # Health checks
+  livenessProbe:
+    enabled: true
+  readinessProbe:
+    enabled: true
+
+# Configuración del dashboard de Argo Rollouts
+dashboard:
+  enabled: true
+  replicas: 1
+  
+  serviceAccount:
+    create: true
+    name: argo-rollouts-dashboard
+  
+  resources:
+    requests:
+      cpu: 50m
+      memory: 64Mi
+    limits:
+      cpu: 200m
+      memory: 256Mi
+
+  service:
+    type: ClusterIP
+    port: 3100
+
+  # Ingress para acceder al dashboard
+  ingress:
+    enabled: true
+    ingressClassName: nginx
+    annotations:
+      cert-manager.io/cluster-issuer: mygitops-ca
+    hosts:
+      - host: rollouts.local
+        paths:
+          - path: /
+            pathType: Prefix
+
+    tls:
+      - secretName: rollouts-tls
+        hosts:
+          - rollouts.local
+
+# RBAC
+rbac:
+  create: true
+
+# Pod Security Policy
+podSecurityPolicy:
+  enabled: false
