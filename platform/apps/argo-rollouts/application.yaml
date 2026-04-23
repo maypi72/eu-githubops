@@ -6,20 +6,17 @@ metadata:
 spec:
   project: platform-project
 
-  source:
-    repoURL: https://github.com/maypi72/eu-githubops
-    targetRevision: main
-    path: platform/apps/argo-rollouts
-
+  sources:
+  - repoURL: https://argoproj.github.io/argo-helm
+    chart: argo-rollouts
+    targetRevision: 2.40.9
     helm:
-      chart: argo-rollouts
-      repoURL: https://argoproj.github.io/argo-helm
-      targetRevision: 2.40.9
-
-      valueFiles:
-        - values.yaml
-
       releaseName: argo-rollouts
+      valueFiles:
+        - $values/values.yaml
+  - repoURL: https://github.com/maypi72/eu-githubops
+    targetRevision: main
+    ref: values
 
   destination:
     server: https://kubernetes.default.svc
