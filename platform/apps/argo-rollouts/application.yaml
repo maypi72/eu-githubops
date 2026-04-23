@@ -6,17 +6,66 @@ metadata:
 spec:
   project: platform-project
 
-  sources:
-  - repoURL: https://argoproj.github.io/argo-helm
+  source:
+    repoURL: https://argoproj.github.io/argo-helm
     chart: argo-rollouts
     targetRevision: 2.40.9
     helm:
       releaseName: argo-rollouts
-      valueFiles:
-        - $values/values.yaml
-  - repoURL: https://github.com/maypi72/eu-githubops
-    targetRevision: main
-    ref: values
+      values: |
+        controller:
+          replicas: 2
+          serviceAccount:
+            create: true
+            name: argo-rollouts
+          resources:
+            requests:
+              cpu: 100m
+              memory: 128Mi
+            limits:
+              cpu: 500m
+              memory: 512Mi
+          livenessProbe:
+            enabled: true
+          readinessProbe:
+            enabled: true
+
+        dashboard:
+          enabled: true
+          replicas: 1
+          serviceAccount:
+            create: true
+            name: argo-rollouts-dashboard
+          resources:
+            requests:
+              cpu: 50m
+              memory: 64Mi
+            limits:
+              cpu: 200m
+              memory: 256Mi
+          service:
+            type: ClusterIP
+            port: 3100
+          ingress:
+            enabled: true
+            ingressClassName: nginx
+            annotations:
+              cert-manager.io/cluster-issuer: mygitops-ca
+            hosts:
+              - host: rollouts.local
+                paths:
+                  - path: /
+                    pathType: Prefix
+            tls:
+              - secretName: rollouts-tls
+                hosts:
+                  - rollouts.local
+
+        rbac:
+          create: true
+
+        podSecurityPolicy:
+          enabled: false
 
   destination:
     server: https://kubernetes.default.svc
