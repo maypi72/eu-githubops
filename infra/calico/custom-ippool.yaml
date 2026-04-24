@@ -5,9 +5,14 @@ apiVersion: projectcalico.org/v3
 kind: IPPool
 metadata:
   name: default-ipv4-ippool
-  namespace: calico-system
 spec:
   cidr: 10.100.0.0/16
-  encapsulation: vxlan
+  blockSize: 26
+  ipipMode: Never
   natOutgoing: true
   nodeSelector: all()
+  vxlanMode: CrossSubnet
+  allowedUses:
+  - Workload
+  - Tunnel
+  assignmentMode: Automatic
