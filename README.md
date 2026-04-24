@@ -7,6 +7,7 @@ Repository para automatizar el bootstrap y configuración de clusters Kubernetes
 - [Instalación y Uso](#instalación-y-uso)
 - [Componentes Core](#componentes-core)
   - [K3s](#configuración-de-k3s)
+  - [Calico](#calico-cni---configuración-de-red)
   - [Helm](#helm)
   - [NGINX Ingress Controller](#nginx-ingress-controller)
 - [Componentes de Operaciones](#componentes-de-operaciones)
@@ -130,6 +131,67 @@ El script `bootstrap_k3s.sh` verifica:
 - ✅ Servicio k3s activo
 - ✅ Pods del sistema en estado Running (máximo 5 minutos)
 - ✅ Kubeconfig accesible y con permisos correctos
+
+### Calico CNI - Configuración de Red
+
+Calico es el Container Network Interface (CNI) que gestiona la conectividad entre pods en el cluster.
+
+#### CIDR de Red de Pods
+
+**Configuración actual**: `10.0.0.0/16`
+
+El CIDR de Calico define el rango de direcciones IP que se asignan a los pods del cluster. Esta configuración es crítica para evitar colisiones con la red del host o la red externa.
+
+**Razón del cambio a `10.0.0.0/16`:**
+- Evita colisión con redes locales (p.ej., VirtualBox con `192.168.0.0/24`)
+- Rango estándar para redes de pods en producción
+- Permite escalabilidad de hasta ~65,000 pods (rango /16)
+
+#### Verificar Configuración de Calico
+
+```bash
+# Ver IPPool actual
+kubectl get ippool -o yaml
+
+# Verificar CIDR asignado
+kubectl get ippool default-ipv4-ippool -o jsonpath='{.spec.cidr}'
+
+# Ver configuración completa de Installation (Tigera Operator)
+kubectl get installation default -o yaml
+```
+
+#### Cambiar CIDR de Calico
+
+Si necesitas cambiar el CIDR (solo posible **antes** de desplegar pods):
+
+```bash
+# 1. Actualizar la Installation CR
+kubectl patch installation default --type='json' \
+  -p='[{"op": "replace", "path": "/spec/calicoNetwork/ipPools/0/cidr", "value":"10.0.0.0/16"}]'
+
+# 2. Eliminar el IPPool antiguo (Tigera lo recreará automáticamente)
+kubectl delete ippool default-ipv4-ippool
+
+# 3. Verificar que se ha creado con el nuevo CIDR (esperar ~30 segundos)
+kubectl get ippool default-ipv4-ippool -o jsonpath='{.spec.cidr}'
+```
+
+**⚠️ Advertencia**: El CIDR de un IPPool es **inmutable** una vez creado. Si ya hay pods corriendo, cambiar el CIDR causará una interrupción de red temporal.
+
+#### Archivo de Configuración
+
+La configuración se encuentra en:
+- **Archivo de referencia**: `infra/calico/custom-ippool.yaml`
+- **Configuración activa**: Installation CR en el cluster (persistida en etcd)
+
+El archivo `custom-ippool.yaml` es documentación del CIDR esperado y puede usarse como referencia durante reinicios o migraciones.
+
+#### Persistencia de Configuración
+
+La configuración de Calico persiste automáticamente en etcd de Kubernetes:
+1. Se almacena en la **Installation CR** de Tigera Operator
+2. Después de reiniciar la VM, Tigera Operator recreará el IPPool con el mismo CIDR
+3. **No requiere intervención manual** después de cambios
 
 ### Troubleshooting
 
