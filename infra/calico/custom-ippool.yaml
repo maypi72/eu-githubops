@@ -6,7 +6,7 @@ kind: IPPool
 metadata:
   name: default-ipv4-ippool
 spec:
-  cidr: 10.100.0.0/16
+  cidr: 10.0.0.0/16
   blockSize: 26
   ipipMode: Never
   natOutgoing: true
