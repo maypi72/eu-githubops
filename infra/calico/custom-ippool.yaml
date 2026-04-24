@@ -1,0 +1,13 @@
+---
+# Custom IPPool para Calico - CIDR: 10.0.0.0/16
+# Evita colisión con la red del host 192.168.0.0/24
+apiVersion: projectcalico.org/v3
+kind: IPPool
+metadata:
+  name: default-ipv4-ippool
+  namespace: calico-system
+spec:
+  cidr: 10.100.0.0/16
+  encapsulation: vxlan
+  natOutgoing: true
+  nodeSelector: all()

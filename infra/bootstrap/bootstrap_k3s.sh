@@ -16,6 +16,8 @@ CALICO_BASE_URL="https://raw.githubusercontent.com/projectcalico/calico/v${CALIC
 CALICO_CRDS_URL="${CALICO_BASE_URL}/operator-crds.yaml"
 CALICO_OPERATOR_URL="${CALICO_BASE_URL}/tigera-operator.yaml"
 CALICO_CUSTOM_RESOURCES_URL="${CALICO_BASE_URL}/custom-resources.yaml"
+# Custom IPPool para evitar colisión de red
+CALICO_CUSTOM_IPPOOL="$(dirname "$(dirname "$0")")/calico/custom-ippool.yaml"
 
 # Colores
 GREEN='\033[0;32m'
@@ -140,6 +142,15 @@ install_calico() {
 
   echo "📦 Aplicando Custom Resources de Calico..."
   retry kubectl apply --server-side --force-conflicts -f "${CALICO_CUSTOM_RESOURCES_URL}"
+
+  echo "📦 Aplicando IPPool personalizado (CIDR: 10.0.0.0/16)..."
+  if [ -f "$CALICO_CUSTOM_IPPOOL" ]; then
+    retry kubectl apply -f "$CALICO_CUSTOM_IPPOOL"
+    echo -e "${GREEN}✓ IPPool personalizado aplicado${NC}"
+  else
+    echo -e "${YELLOW}⚠ Archivo $CALICO_CUSTOM_IPPOOL no encontrado${NC}"
+    echo "  Se usará la configuración por defecto de Calico"
+  fi
 
   echo -e "${GREEN}✓ Calico instalado correctamente${NC}"
   echo "::endgroup::"
