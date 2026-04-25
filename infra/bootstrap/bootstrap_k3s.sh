@@ -2,13 +2,16 @@
 set -euo pipefail
 IFS=$'\n\t'
 
+# ============================================================
+# BOOTSTRAP K3S - Instalación limpia de K3s con Flannel
+# ============================================================
+
 # Configuración de K3s
 K3S_VERSION="${K3S_VERSION:-v1.34.4+k3s1}"
 K3S_CHANNEL="${K3S_CHANNEL:-stable}"
 K3S_INSTALL_SCRIPT_URL="https://get.k3s.io"
 
-# Opciones fijas de instalación para deshabilitar componentes innecesarios
-# K3s usa Flannel como CNI por defecto (no se requiere instalación adicional)
+# Opciones de instalación: Flannel incluido por defecto, sin traefik ni servicelb
 K3S_EXEC_OPTS="--disable traefik --disable servicelb --write-kubeconfig-mode 644"
 
 # Colores
@@ -24,194 +27,209 @@ retry() {
   until "$@"; do
     i=$((i+1))
     if [ $i -ge $max ]; then
-      echo -e "${RED}Command failed after $i attempts: $*${NC}"
+      echo -e "${RED}❌ Comando falló después de $i intentos: $*${NC}"
       return 1
     fi
-    echo "Retry $i/$max: $*"
+    echo "🔄 Reintentando ($i/$max): $*"
     sleep $((delay * i))
   done
 }
 
-install_dependencies() {
-  echo "::group::Preparando sistema"
-  echo "Verificando requisitos previos..."
-
-  # Verificar puertos disponibles
-  echo "Verificando puertos disponibles:"
-  netstat -tuln 2>/dev/null | grep -E ":6443|:10250" || echo -e "${YELLOW}⚠ Puerto 6443 (API) disponible${NC}"
-
-  # Verificar conectividad DNS
+check_prerequisites() {
+  echo "::group::Verificando requisitos previos"
+  echo "📋 Validando sistema y dependencias..."
   echo ""
-  echo "Verificando DNS:"
-  if nslookup kubernetes.default.svc.cluster.local 8.8.8.8 >/dev/null 2>&1 || true; then
-    echo -e "${GREEN}✓ DNS funcional${NC}"
+
+  # Verificar SO
+  OS=$(uname -s)
+  echo "Sistema operativo: $OS"
+  
+  if [[ "$OS" != "Linux" && "$OS" != "Darwin" ]]; then
+    echo -e "${RED}❌ Sistema operativo no soportado: $OS${NC}"
+    echo "K3s solo funciona en Linux y macOS"
+    exit 1
   fi
 
-  # Limpiar instalación antigua si existe
-  if [ -d "/var/lib/rancher/k3s" ]; then
-    echo -e "${YELLOW}⚠ Directorio /var/lib/rancher/k3s ya existe${NC}"
-    echo "  Si hay problemas, considera: sudo rm -rf /var/lib/rancher/k3s"
+  if [[ "$OS" == "Darwin" ]]; then
+    echo -e "${YELLOW}⚠️  En macOS, K3s requiere Docker Desktop o Rancher Desktop${NC}"
+    echo "Alternativas recomendadas:"
+    echo "  • Minikube: brew install minikube && minikube start"
+    echo "  • OrbStack: https://orbstack.dev/"
+    echo "  • Docker Desktop: Activar Kubernetes en preferencias"
+    echo ""
+  fi
+
+  # Verificar curl
+  if ! command -v curl &>/dev/null; then
+    echo -e "${RED}❌ curl no está instalado${NC}"
+    exit 1
+  fi
+  echo -e "${GREEN}✓ curl${NC}"
+
+  # Verificar puertos disponibles (solo en Linux)
+  if [[ "$OS" == "Linux" ]]; then
+    echo ""
+    echo "Verificando puertos:"
+    if command -v netstat &>/dev/null; then
+      if netstat -tuln 2>/dev/null | grep -qE ":6443|:10250"; then
+        echo -e "${YELLOW}⚠️  Puertos 6443 o 10250 ya en uso${NC}"
+      else
+        echo -e "${GREEN}✓ Puertos 6443 (API) y 10250 disponibles${NC}"
+      fi
+    fi
   fi
 
   echo ""
-  sudo apt-get update -y
-  sudo apt-get install -y curl jq ca-certificates
-  sudo swapoff -a || true
-  sudo sed -i.bak '/ swap / s/^\(.*\)$/#\1/g' /etc/fstab || true
+  echo -e "${GREEN}✓ Requisitos OK${NC}"
   echo "::endgroup::"
 }
 
 install_k3s() {
-  echo "::group::Comprobando si k3s ya está instalado"
+  echo "::group::Estado de K3s"
+  
   if command -v k3s >/dev/null 2>&1; then
-    echo "k3s ya instalado: $(k3s --version)"
+    CURRENT_VERSION=$(k3s --version)
+    echo -e "${YELLOW}⚠️  K3s ya está instalado${NC}"
+    echo "Versión actual: $CURRENT_VERSION"
+    echo "Versión solicitada: ${K3S_VERSION}"
+    echo ""
+    echo "ℹ️  Para reinstalar, ejecuta:"
+    echo "  sudo /usr/local/bin/k3s-uninstall.sh"
+    echo "  sudo rm -rf /var/lib/rancher/k3s /etc/rancher"
+    echo ""
+    echo "En entorno CI/CD: continuando con instalación existente..."
     echo "::endgroup::"
     return 0
   fi
-  echo "k3s no instalado, procediendo..."
+  
+  echo "K3s no está instalado, procediendo con instalación..."
   echo ""
-  echo "Opciones de instalación:"
-  echo "  Versión: ${K3S_VERSION}"
-  echo "  Canal: ${K3S_CHANNEL}"
-  echo "  Opciones: ${K3S_EXEC_OPTS}"
+  echo "Configuración:"
+  echo "  📦 Versión: ${K3S_VERSION}"
+  echo "  🔀 Canal: ${K3S_CHANNEL}"
+  echo "  ⚙️  Opciones: ${K3S_EXEC_OPTS}"
+  echo "  🌐 CNI: Flannel (incluido por defecto)"
   echo "::endgroup::"
 
-  echo "::group::Instalando k3s"
-
-  # Ejecutar instalación de k3s
+  echo "::group::Instalando K3s"
+  echo "📥 Descargando e instalando desde ${K3S_INSTALL_SCRIPT_URL}..."
+  
   if ! curl -sfL "${K3S_INSTALL_SCRIPT_URL}" | \
     INSTALL_K3S_VERSION="${K3S_VERSION}" \
     INSTALL_K3S_CHANNEL="${K3S_CHANNEL}" \
     INSTALL_K3S_EXEC="server ${K3S_EXEC_OPTS}" \
     sh -s -; then
-    echo -e "${RED}ERROR: Falló la ejecución del script de instalación de k3s${NC}"
+    echo -e "${RED}❌ Error: Falló la instalación de K3s${NC}"
     exit 1
   fi
 
-  # Esperar a que el servicio k3s esté listo
-  echo "Esperando a que k3s.service inicie..."
+  echo "⏳ Esperando a que k3s.service esté listo..."
   sleep 5
 
   # Verificar que el servicio está activo
   if ! systemctl is-active --quiet k3s; then
-    echo -e "${RED}ERROR: k3s.service no está activo${NC}"
+    echo -e "${RED}❌ Error: k3s.service no está activo${NC}"
     echo ""
-    echo "Estado del servicio k3s:"
+    echo "Estado del servicio:"
     systemctl status k3s || true
     echo ""
-    echo "Últimos logs de k3s:"
+    echo "Últimos logs:"
     journalctl -xeu k3s.service -n 50 || true
     exit 1
   fi
 
-  echo -e "${GREEN}✓ k3s instalado y servicio activo${NC}"
-  echo "::endgroup::"
-}
-
-wait_for_openapi_ready() {
-  echo "::group::Esperando a que el API server esté plenamente disponible"
-  echo "⏳ Esperando a que OpenAPI esté listo..."
-  retry kubectl cluster-info
-  echo -e "${GREEN}✓ API server está disponible${NC}"
-  echo "::endgroup::"
-}
-
-wait_for_flannel_ready() {
-  echo "::group::Esperando a que Flannel esté completamente listo"
-  echo "⏳ Esperando a que Flannel esté listo..."
-  retry kubectl -n kube-flannel wait --for=condition=Available deployment --all --timeout=180s
-  echo -e "${GREEN}✓ Flannel está listo${NC}"
-  echo "::endgroup::"
-}
-
-wait_for_node_ready() {
-  echo "::group::Esperando a que el nodo esté Ready"
-  retry kubectl wait --for=condition=Ready node --all --timeout=300s
-  echo -e "${GREEN}✓ Nodo está Ready${NC}"
+  echo -e "${GREEN}✓ K3s instalado correctamente${NC}"
+  echo "Versión: $(k3s --version)"
   echo "::endgroup::"
 }
 
 
 # ============================================================
-# Ejecución principal del bootstrap en orden correcto
+# EJECUCIÓN PRINCIPAL
 # ============================================================
 
-# Primero verificar si k3s ya está instalado
-echo "::group::Comprobando si k3s ya está instalado"
-if command -v k3s >/dev/null 2>&1; then
-  echo -e "${GREEN}✓ k3s ya está instalado: $(k3s --version)${NC}"
-  echo "::endgroup::"
-else
-  echo "k3s no está instalado, procediendo con instalación..."
-  echo "::endgroup::"
-  # Solo instalar dependencias si k3s no está presente
-  install_dependencies
-fi
+echo ""
+echo -e "${GREEN}═══════════════════════════════════════════════════════${NC}"
+echo -e "${GREEN}🚀 BOOTSTRAP K3S - Instalación con Flannel CNI${NC}"
+echo -e "${GREEN}═══════════════════════════════════════════════════════${NC}"
+echo ""
 
+# 1. Verificar requisitos
+check_prerequisites
+
+# 2. Verificar/Instalar K3s
 install_k3s
 
-# Copiar kubeconfig temprano para que esté disponible para sus scripts
-echo "::group::Configurando KUBECONFIG"
+# 3. Configurar kubeconfig
+echo "::group::Configurando acceso al cluster"
 KUBECONFIG="${KUBECONFIG:-${HOME}/kubeconfig}"
 export KUBECONFIG
 mkdir -p "$(dirname "$KUBECONFIG")"
 
-echo "Copiando kubeconfig de /etc/rancher/k3s/k3s.yaml a $KUBECONFIG..."
+echo "📄 Copiando kubeconfig a ${KUBECONFIG}..."
 if ! sudo cp /etc/rancher/k3s/k3s.yaml "$KUBECONFIG"; then
-  echo -e "${RED}ERROR: No se pudo copiar el kubeconfig${NC}"
+  echo -e "${RED}❌ Error: No se pudo copiar kubeconfig${NC}"
   exit 1
 fi
+
+# Ajustar permisos
 sudo chmod 600 "$KUBECONFIG"
-sudo chown "$(id -u):$(id -g)" "$KUBECONFIG"
-echo -e "${GREEN}✓ KUBECONFIG disponible: $KUBECONFIG${NC}"
+sudo chown "$(id -u):$(id -g)" "$KUBECONFIG" || true
+
+echo -e "${GREEN}✓ KUBECONFIG configurado${NC}"
+echo "  Ubicación: $KUBECONFIG"
+echo "  Tamaño: $(du -h "$KUBECONFIG" | cut -f1)"
+echo "  Permisos: $(stat -c '%a' "$KUBECONFIG" 2>/dev/null || echo '600')"
 echo "::endgroup::"
 
-wait_for_openapi_ready
-
-echo "::group::Verificando CNI (Flannel)"
-echo -e "${GREEN}✓ Flannel está incluido por defecto en K3s${NC}"
-echo "  Flannel proporciona red superpuesta simple y eficiente"
+# 4. Esperar a API server
+echo "::group::Esperando API server"
+echo "⏳ Aguardando disponibilidad del API server..."
+retry kubectl cluster-info
+echo -e "${GREEN}✓ API server disponible${NC}"
 echo "::endgroup::"
 
-wait_for_flannel_ready
-wait_for_node_ready
-
-echo "::group::Verificando kubeconfig"
-if [ ! -f "$KUBECONFIG" ]; then
-  echo -e "${RED}ERROR: kubeconfig no disponible en $KUBECONFIG${NC}"
-  exit 1
-fi
-echo -e "${GREEN}✓ KUBECONFIG disponible en $KUBECONFIG${NC}"
-echo -e "${GREEN}✓ Tamaño: $(du -h "$KUBECONFIG" | cut -f1)${NC}"
-echo -e "${GREEN}✓ Permisos: $(stat -c '%a' "$KUBECONFIG" 2>/dev/null || echo 'desconocidos')${NC}"
+# 5. Verificar Flannel
+echo "::group::Verificando Flannel CNI"
+echo "✓ Flannel está incluido por defecto en K3s"
+echo "  • Red superpuesta: simple y eficiente"
+echo "  • CIDR por defecto: 10.42.0.0/16"
+echo "  • Pods namespace: kube-flannel"
+echo ""
+echo "⏳ Aguardando a que Flannel esté listo..."
+retry kubectl -n kube-flannel wait --for=condition=Available deployment --all --timeout=180s
+echo -e "${GREEN}✓ Flannel listo${NC}"
 echo "::endgroup::"
 
-echo "::group::Esperando a que el nodo sea visible en el cluster"
-retry kubectl get nodes
+# 6. Esperar nodo Ready
+echo "::group::Verificando estado del nodo"
+echo "⏳ Aguardando a que el nodo esté Ready..."
+retry kubectl wait --for=condition=Ready node --all --timeout=300s
+echo -e "${GREEN}✓ Nodo en estado Ready${NC}"
+echo ""
+echo "Nodos del cluster:"
+kubectl get nodes -o wide
 echo "::endgroup::"
 
-echo "::group::Verificando estado final del cluster"
-echo "Esperando a que todos los pods del sistema estén en estado Running o Succeeded..."
+# 7. Verificación final de pods
+echo "::group::Verificación final del cluster"
+echo "📊 Estado de pods en kube-system:"
+echo ""
 
-TIMEOUT_SECONDS=300  # 5 minutos
+TIMEOUT_SECONDS=300
 ELAPSED=0
 CHECK_INTERVAL=5
 
 while [ $ELAPSED -lt $TIMEOUT_SECONDS ]; do
-  # Contar pods en estado Running o Succeeded en kube-system
-  RUNNING_PODS=$(kubectl get pods -n kube-system --field-selector=status.phase=Running --no-headers 2>/dev/null | wc -l)
-  SUCCEEDED_PODS=$(kubectl get pods -n kube-system --field-selector=status.phase=Succeeded --no-headers 2>/dev/null | wc -l)
-  
-  # Contar pods NO en estado Running o Succeeded (Pending, Failed, CrashLoopBackOff, etc.)
+  RUNNING=$(kubectl get pods -n kube-system --field-selector=status.phase=Running --no-headers 2>/dev/null | wc -l)
+  SUCCEEDED=$(kubectl get pods -n kube-system --field-selector=status.phase=Succeeded --no-headers 2>/dev/null | wc -l)
   NOT_READY=$(kubectl get pods -n kube-system --field-selector=status.phase!=Running,status.phase!=Succeeded --no-headers 2>/dev/null | wc -l)
+  TOTAL=$((RUNNING + SUCCEEDED + NOT_READY))
   
-  TOTAL=$((RUNNING_PODS + SUCCEEDED_PODS + NOT_READY))
+  printf "  [%3ds] Running: %d | Succeeded: %d | Otros: %d | Total: %d\n" $ELAPSED $RUNNING $SUCCEEDED $NOT_READY $TOTAL
   
-  echo -e "${GREEN}✓${NC} Pods en kube-system: Running=$RUNNING_PODS | Succeeded=$SUCCEEDED_PODS | Otros=$NOT_READY | Total=$TOTAL | Tiempo: ${ELAPSED}s"
-  
-  # Si todos los pods estén listos, salir
   if [ $NOT_READY -eq 0 ] && [ $TOTAL -gt 0 ]; then
-    echo -e "${GREEN}✓ ¡Todos los pods de K3s están Running o Succeeded!${NC}"
+    echo -e "${GREEN}✓ Todos los pods de K3s están listos${NC}"
     break
   fi
   
@@ -220,12 +238,36 @@ while [ $ELAPSED -lt $TIMEOUT_SECONDS ]; do
 done
 
 if [ $NOT_READY -gt 0 ]; then
-  echo -e "${YELLOW}⚠ Algunos pods aún no están Ready, continuando...${NC}"
+  echo -e "${YELLOW}⚠️  Algunos pods pendientes (continuando...)${NC}"
   echo ""
-  echo "Pods no listos en kube-system:"
   kubectl get pods -n kube-system --field-selector=status.phase!=Running,status.phase!=Succeeded || true
 fi
+
 echo "::endgroup::"
 
-echo -e "${GREEN}✓ ¡Bootstrap completado exitosamente!${NC}"
+# 8. Resumen final
+echo ""
+echo -e "${GREEN}═══════════════════════════════════════════════════════${NC}"
+echo -e "${GREEN}✅ BOOTSTRAP COMPLETADO EXITOSAMENTE${NC}"
+echo -e "${GREEN}═══════════════════════════════════════════════════════${NC}"
+echo ""
+echo "📋 Información de acceso:"
+echo "  • KUBECONFIG: $KUBECONFIG"
+echo "  • Versión: $(kubectl version --client --short 2>/dev/null || echo 'N/A')"
+echo ""
+echo "🌐 Configuración de la red:"
+echo "  • CNI: Flannel"
+echo "  • Pods CIDR: 10.42.0.0/16"
+echo "  • Services CIDR: 10.43.0.0/16"
+echo ""
+echo "📖 Próximos pasos:"
+echo "  1. Verificar acceso: kubectl get nodes"
+echo "  2. Ver pods: kubectl get pods -A"
+echo "  3. Ejecutar siguiente script: ./infra/bootstrap/bootstrap_helm.sh"
+echo ""
+echo "ℹ️  Para usar kubeconfig en otra máquina:"
+echo "  export KUBECONFIG=${KUBECONFIG}"
+echo ""
+echo -e "${GREEN}═══════════════════════════════════════════════════════${NC}"
+echo ""
 

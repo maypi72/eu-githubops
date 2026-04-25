@@ -42,6 +42,7 @@ jobs:
         run: |
           echo "::group::Validación y preparación de scripts"
           echo "Verificando existencia y permisos de scripts..."
+          echo ""
           
           required_files=(
             "infra/bootstrap/bootstrap_k3s.sh"
@@ -69,17 +70,21 @@ jobs:
           done
           
           echo ""
-          echo "✓ Todos los scripts de bootstrap validados y listos"
+          echo "ℹ️  Configuración del cluster:"
+          echo "  • CNI: Flannel (incluido en K3s por defecto)"
+          echo "  • Sin componentes innecesarios (traefik, servicelb deshabilitados)"
+          echo ""
+          echo "✓ Todos los scripts validados y listos"
           echo "::endgroup::"
 
       - name: System Information
         run: |
           echo "::group::Información del sistema"
-          echo "OS: $(uname -s)"
+          echo "SO: $(uname -s)"
           echo "Kernel: $(uname -r)"
           echo "Arquitectura: $(uname -m)"
           echo "Memoria: $(free -h | grep Mem)"
-          echo "Disco: $(df -h / | tail -1)"
+          echo "Disco disponible: $(df -h / | tail -1)"
           echo "::endgroup::"
 
       - name: Check Prerequisites
@@ -117,16 +122,24 @@ jobs:
           echo "::group::Ejecutando Bootstrap"
           
           if [ "${{ inputs.dry_run }}" == "true" ]; then
-            echo "⚠ MODO DRY-RUN: Scripts no serán ejecutados"
+            echo "⚠️  MODO DRY-RUN: Scripts no serán ejecutados"
             echo "DRY_RUN=true" >> $GITHUB_ENV
           else
-            echo "Iniciando bootstrap del cluster..."
+            echo "🚀 Iniciando bootstrap del cluster..."
+            echo ""
+            echo "Configuración:"
+            echo "  • K3s Version: ${{ inputs.k3s_version }}"
+            echo "  • CNI: Flannel (sin Calico)"
+            echo "  • Timeout: 30 minutos"
+            echo ""
             bash infra/bootstrap/bootstrap_all.sh
             bootstrap_exit=$?
             
             if [ $bootstrap_exit -eq 0 ]; then
+              echo ""
               echo "✓ Bootstrap completado exitosamente"
             else
+              echo ""
               echo "✗ Bootstrap falló con código $bootstrap_exit"
               exit $bootstrap_exit
             fi
@@ -138,30 +151,34 @@ jobs:
         if: success() && env.DRY_RUN != 'true'
         run: |
           echo "::group::Verificación de instalaciones"
+          echo ""
           
           # Verificar k3s
           if command -v k3s >/dev/null 2>&1; then
+            echo "✓ K3s instalado:"
             k3s --version
           fi
           
           # Verificar kubectl
           if command -v kubectl >/dev/null 2>&1; then
-            echo "kubectl version:"
+            echo ""
+            echo "✓ kubectl disponible:"
             kubectl version --client --short || true
             
             echo ""
             echo "Nodos del cluster:"
             kubectl get nodes || true
+            
+            echo ""
+            echo "CNI Status:"
+            kubectl get pods -n kube-flannel -o wide || true
           fi
           
           # Verificar Helm
           if command -v helm >/dev/null 2>&1; then
-            echo "Helm version:"
-            helm version --short || true
-            
             echo ""
-            echo "Releases instalados:"
-            helm list --all-namespaces || true
+            echo "✓ Helm instalado:"
+            helm version --short || true
           fi
           
           echo "::endgroup::"
@@ -169,26 +186,27 @@ jobs:
       - name: Secure kubeconfig from k3s
         if: success() && env.DRY_RUN != 'true'
         run: |
-          echo "::group::Asegurando kubeconfig de k3s"
+          echo "::group::Verificando kubeconfig de K3s"
           
           K3S_KUBECONFIG="/etc/rancher/k3s/k3s.yaml"
           
           if [ -f "$K3S_KUBECONFIG" ]; then
-            # Copiar kubeconfig sin permisos elevados
-            sudo cp "$K3S_KUBECONFIG" "$KUBECONFIG"
-            
-            # Cambiar propietario para evitar usar sudo en pasos posteriores
-            sudo chown $(id -u):$(id -g) "$KUBECONFIG"
-            
-            # Establecer permisos restrictivos (solo lectura para el owner)
-            chmod 600 "$KUBECONFIG"
-            
-            echo "✓ kubeconfig copiado desde $K3S_KUBECONFIG"
-            echo "✓ Propietario cambiado a $(whoami)"
-            echo "✓ Permisos establecidos a 600 (solo lectura para owner)"
+            # Verificar que KUBECONFIG ya existe desde bootstrap_k3s.sh
+            if [ -f "$KUBECONFIG" ]; then
+              echo "✓ kubeconfig ya configurado en $KUBECONFIG"
+              echo "  Tamaño: $(du -h "$KUBECONFIG" | cut -f1)"
+              echo "  Permisos: $(stat -c '%a' "$KUBECONFIG")"
+            else
+              echo "⚠ kubeconfig no encontrado en $KUBECONFIG"
+              echo "  Copiando desde $K3S_KUBECONFIG..."
+              sudo cp "$K3S_KUBECONFIG" "$KUBECONFIG"
+              sudo chown $(id -u):$(id -g) "$KUBECONFIG"
+              chmod 600 "$KUBECONFIG"
+              echo "✓ kubeconfig copiado y asegurado"
+            fi
           else
             echo "⚠ k3s kubeconfig no encontrado en: $K3S_KUBECONFIG"
-            echo "El workflow continuará esperando que esté disponible en: $KUBECONFIG"
+            echo "  El cluster podría no estar completamente inicializado"
           fi
           
           echo "::endgroup::"
@@ -283,7 +301,9 @@ jobs:
           echo "✓ Revisa los logs anteriores para detalles del error"
           echo "::endgroup::"
 
-  # NOTA: Para implementar protecciones adicionales en el job "bootstrap":
+  # NOTA: Configuración de protecciones y timeouts
+  # 
+  # Para implementar aprobación manual en el job "bootstrap":
   # 1. Ve a Settings → Environments → New environment → "lab"
   # 2. Configura:
   #    - Required reviewers: usuarios que deben aprobar antes de ejecutar
@@ -291,24 +311,43 @@ jobs:
   #    - Deployment branches: restringe a ramas específicas (ej: main, develop)
   #    - Environment secrets: credenciales únicas para este environment
   #
-  # Con esto, el workflow esperará aprobación antes de ejecutar el job "bootstrap"
+  # Timeouts de bootstrap (manejados en los scripts):
+  # - bootstrap_k3s.sh: Espera hasta 5 minutos a que K3s + Flannel estén ready
+  # - bootstrap_helm.sh: Verifica instalación de Helm
+  # - bootstrap_ingress.sh: Verifica que el deployment del ingress existe
   #
-  # NOTA: Los chequeos de pods se hacen directamente en los scripts:
-  # - bootstrap_k3s.sh: Espera a que los pods de K3s estén running (5 minutos max)
-  # - bootstrap_ingress.sh: Verifica que el deployment del ingress existe (300 segundos max)
+  # CNI Utilizado: Flannel (incluido por defecto en K3s)
+  # - Simple y eficiente para clusters pequeños/medianos
+  # - CIDR de pods: 10.42.0.0/16
+  # - CIDR de servicios: 10.43.0.0/16
 
       - name: Success Summary
         if: success()
         run: |
           echo "::group::Resumen de éxito"
           echo ""
-          echo "✓ Bootstrap completado exitosamente"
-          echo "✓ kubeconfig disponible en artifacts"
-          echo "✓ Puede ser descargado para interactuar con el cluster"
+          echo "✅ BOOTSTRAP COMPLETADO EXITOSAMENTE"
           echo ""
-          echo "Próximos pasos:"
-          echo "1. Descargue el kubeconfig de los artifacts"
-          echo "2. Exporte: export KUBECONFIG=<ruta-a-kubeconfig>"
-          echo "3. Verifique: kubectl get nodes"
+          echo "📊 Cluster instalado con:"
+          echo "  • K3s: $(k3s --version 2>/dev/null || echo 'N/A')"
+          echo "  • CNI: Flannel (red superpuesta simple y eficiente)"
+          echo "  • Pods CIDR: 10.42.0.0/16"
+          echo "  • Services CIDR: 10.43.0.0/16"
+          echo ""
+          echo "📄 kubeconfig disponible:"
+          echo "  • Ubicación: $KUBECONFIG"
+          echo "  • Descárgalo desde: Artifacts (kubeconfig)"
+          echo "  • Retención: 30 días"
+          echo ""
+          echo "🔑 IMPORTANTE - Seguridad:"
+          echo "  • El kubeconfig contiene credenciales"
+          echo "  • Mantenlo privado y restringido"
+          echo "  • No lo subas a repositorios públicos"
+          echo ""
+          echo "📖 Próximos pasos:"
+          echo "  1. Descarga el kubeconfig de artifacts"
+          echo "  2. Configura: export KUBECONFIG=<ruta-a-kubeconfig>"
+          echo "  3. Verifica: kubectl get nodes"
+          echo "  4. Ejecuta: ./infra/bootstrap/bootstrap_helm.sh"
           echo ""
           echo "::endgroup::"
