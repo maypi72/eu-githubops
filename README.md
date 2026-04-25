@@ -7,7 +7,6 @@ Repository para automatizar el bootstrap y configuración de clusters Kubernetes
 - [Instalación y Uso](#instalación-y-uso)
 - [Componentes Core](#componentes-core)
   - [K3s](#configuración-de-k3s)
-  - [Calico](#calico-cni---configuración-de-red)
   - [Helm](#helm)
   - [NGINX Ingress Controller](#nginx-ingress-controller)
 - [Componentes de Operaciones](#componentes-de-operaciones)
@@ -100,10 +99,10 @@ También puedes ejecutar cada script manualmente en el orden especificado:
 
 ### Opciones de Instalación
 
-K3s se instala con las siguientes opciones deshabilitando componentes innecesarios y configurando Calico como CNI:
+K3s se instala con las siguientes opciones deshabilitando componentes innecesarios. Flannel está configurado como CNI por defecto:
 
 ```bash
-K3S_EXEC_OPTS="--disable traefik --disable servicelb --flannel-backend=none --disable-network-policy --write-kubeconfig-mode 644"
+K3S_EXEC_OPTS="--disable traefik --disable servicelb --write-kubeconfig-mode 644"
 ```
 
 #### Significado de cada opción:
@@ -111,17 +110,38 @@ K3S_EXEC_OPTS="--disable traefik --disable servicelb --flannel-backend=none --di
 | Opción | Descripción |
 |--------|-------------|
 | `--disable traefik` | No instala Traefik (Ingress Controller integrado). Usamos NGINX via Helm |
-| `--disable servicelb` | No instala klipper-lb (LoadBalancer simple). Mejor control con Calico |
-| `--flannel-backend=none` | Desactiva Flannel CNI para usar Calico en su lugar |
-| `--disable-network-policy` | Sin política de red integrada. Calico proporciona versión más robusta |
+| `--disable servicelb` | No instala klipper-lb (LoadBalancer simple) |
 | `--write-kubeconfig-mode 644` | Genera kubeconfig con permisos 644 (legible sin `sudo`) |
 
-### Flujo de Instalación
+### CNI: Flannel
 
-1. **K3s Core**: Instala K3s sin CNI
-2. **Calico**: Se instala después como CNI con manifests oficial
-3. **Helm**: Se instala para gestionar otros componentes
-4. **NGINX Ingress**: Se despliega via Helm usando `infra/values/ingress_values.yaml`
+**Flannel** es el Container Network Interface (CNI) incluido por defecto en K3s. Proporciona una red superpuesta simple y eficiente para la comunicación entre pods.
+
+#### Características de Flannel
+
+- ✅ Incluido por defecto en K3s (sin instalación adicional)
+- ✅ Simple y ligero (ideal para clusters pequeños y medianos)
+- ✅ Bajo overhead de recursos
+- ✅ Fácil de configurar y mantener
+
+#### Flujo de Instalación
+
+1. **K3s Core**: Instala K3s con Flannel como CNI por defecto
+2. **Helm**: Se instala para gestionar otros componentes
+3. **NGINX Ingress**: Se despliega via Helm usando `infra/values/ingress_values.yaml`
+
+#### Verificar instalación de Flannel
+
+```bash
+# Ver pods de Flannel
+kubectl get pods -n kube-flannel
+
+# Ver estado de nodos
+kubectl get nodes
+
+# Ver configuración de red
+kubectl get pods -A -o wide
+```
 
 ### Verificación post-instalación
 
@@ -131,67 +151,6 @@ El script `bootstrap_k3s.sh` verifica:
 - ✅ Servicio k3s activo
 - ✅ Pods del sistema en estado Running (máximo 5 minutos)
 - ✅ Kubeconfig accesible y con permisos correctos
-
-### Calico CNI - Configuración de Red
-
-Calico es el Container Network Interface (CNI) que gestiona la conectividad entre pods en el cluster.
-
-#### CIDR de Red de Pods
-
-**Configuración actual**: `10.0.0.0/16`
-
-El CIDR de Calico define el rango de direcciones IP que se asignan a los pods del cluster. Esta configuración es crítica para evitar colisiones con la red del host o la red externa.
-
-**Razón del cambio a `10.0.0.0/16`:**
-- Evita colisión con redes locales (p.ej., VirtualBox con `192.168.0.0/24`)
-- Rango estándar para redes de pods en producción
-- Permite escalabilidad de hasta ~65,000 pods (rango /16)
-
-#### Verificar Configuración de Calico
-
-```bash
-# Ver IPPool actual
-kubectl get ippool -o yaml
-
-# Verificar CIDR asignado
-kubectl get ippool default-ipv4-ippool -o jsonpath='{.spec.cidr}'
-
-# Ver configuración completa de Installation (Tigera Operator)
-kubectl get installation default -o yaml
-```
-
-#### Cambiar CIDR de Calico
-
-Si necesitas cambiar el CIDR (solo posible **antes** de desplegar pods):
-
-```bash
-# 1. Actualizar la Installation CR
-kubectl patch installation default --type='json' \
-  -p='[{"op": "replace", "path": "/spec/calicoNetwork/ipPools/0/cidr", "value":"10.0.0.0/16"}]'
-
-# 2. Eliminar el IPPool antiguo (Tigera lo recreará automáticamente)
-kubectl delete ippool default-ipv4-ippool
-
-# 3. Verificar que se ha creado con el nuevo CIDR (esperar ~30 segundos)
-kubectl get ippool default-ipv4-ippool -o jsonpath='{.spec.cidr}'
-```
-
-**⚠️ Advertencia**: El CIDR de un IPPool es **inmutable** una vez creado. Si ya hay pods corriendo, cambiar el CIDR causará una interrupción de red temporal.
-
-#### Archivo de Configuración
-
-La configuración se encuentra en:
-- **Archivo de referencia**: `infra/calico/custom-ippool.yaml`
-- **Configuración activa**: Installation CR en el cluster (persistida en etcd)
-
-El archivo `custom-ippool.yaml` es documentación del CIDR esperado y puede usarse como referencia durante reinicios o migraciones.
-
-#### Persistencia de Configuración
-
-La configuración de Calico persiste automáticamente en etcd de Kubernetes:
-1. Se almacena en la **Installation CR** de Tigera Operator
-2. Después de reiniciar la VM, Tigera Operator recreará el IPPool con el mismo CIDR
-3. **No requiere intervención manual** después de cambios
 
 ### Troubleshooting
 

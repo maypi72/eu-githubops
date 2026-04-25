@@ -7,17 +7,9 @@ K3S_VERSION="${K3S_VERSION:-v1.34.4+k3s1}"
 K3S_CHANNEL="${K3S_CHANNEL:-stable}"
 K3S_INSTALL_SCRIPT_URL="https://get.k3s.io"
 
-# Opciones fijas de instalación para deshabilitar componentes y usar Calico
-K3S_EXEC_OPTS="--disable traefik --disable servicelb --flannel-backend=none --disable-network-policy --write-kubeconfig-mode 644"
-
-# Configuración de Calico (usando Operator, CRDs y Custom Resources)
-CALICO_VERSION="${CALICO_VERSION:-3.30.7}"
-CALICO_BASE_URL="https://raw.githubusercontent.com/projectcalico/calico/v${CALICO_VERSION}/manifests"
-CALICO_CRDS_URL="${CALICO_BASE_URL}/operator-crds.yaml"
-CALICO_OPERATOR_URL="${CALICO_BASE_URL}/tigera-operator.yaml"
-CALICO_CUSTOM_RESOURCES_URL="${CALICO_BASE_URL}/custom-resources.yaml"
-# Custom IPPool para evitar colisión de red
-CALICO_CUSTOM_IPPOOL="$(dirname "$(dirname "$0")")/calico/custom-ippool.yaml"
+# Opciones fijas de instalación para deshabilitar componentes innecesarios
+# K3s usa Flannel como CNI por defecto (no se requiere instalación adicional)
+K3S_EXEC_OPTS="--disable traefik --disable servicelb --write-kubeconfig-mode 644"
 
 # Colores
 GREEN='\033[0;32m'
@@ -124,51 +116,11 @@ wait_for_openapi_ready() {
   echo "::endgroup::"
 }
 
-install_calico() {
-  echo "::group::Instalando Calico CNI"
-
-  echo "📦 Instalando CRDs de Calico (server-side apply)..."
-  # Limpiar anotación gigante si existe
-  kubectl annotate crd installations.operator.tigera.io kubectl.kubernetes.io/last-applied-configuration- >/dev/null 2>&1 || true
-
-  retry kubectl apply --server-side --force-conflicts -f "${CALICO_CRDS_URL}"
-
-  echo "📦 Instalando Tigera Operator..."
-  retry kubectl apply --server-side --force-conflicts -f "${CALICO_OPERATOR_URL}"
-
-  echo "📦 Esperando a que el Operator esté listo..."
-  sleep 10
-  retry kubectl wait --for=condition=Ready pod -l k8s-app=tigera-operator -n tigera-operator --timeout=300s
-
-  echo "📦 Aplicando Custom Resources de Calico..."
-  retry kubectl apply --server-side --force-conflicts -f "${CALICO_CUSTOM_RESOURCES_URL}"
-
-  echo "📦 Aplicando IPPool personalizado (CIDR: 10.0.0.0/16)..."
-  if [ -f "$CALICO_CUSTOM_IPPOOL" ]; then
-    retry kubectl apply -f "$CALICO_CUSTOM_IPPOOL"
-    echo -e "${GREEN}✓ IPPool personalizado aplicado${NC}"
-  else
-    echo -e "${YELLOW}⚠ Archivo $CALICO_CUSTOM_IPPOOL no encontrado${NC}"
-    echo "  Se usará la configuración por defecto de Calico"
-  fi
-
-  echo -e "${GREEN}✓ Calico instalado correctamente${NC}"
-  echo "::endgroup::"
-}
-
-is_calico_installed() {
-  # Verificar si los pods de Calico están running
-  if kubectl get pods -n calico-system -o jsonpath='{.items[*].status.phase}' 2>/dev/null | grep -q "Running"; then
-    return 0
-  fi
-  return 1
-}
-
-wait_for_calico_ready() {
-  echo "::group::Esperando a que Calico esté completamente listo"
-  echo "⏳ Esperando a que Calico esté listo..."
-  retry kubectl -n calico-system wait --for=condition=Available deployment --all --timeout=180s
-  echo -e "${GREEN}✓ Calico está listo${NC}"
+wait_for_flannel_ready() {
+  echo "::group::Esperando a que Flannel esté completamente listo"
+  echo "⏳ Esperando a que Flannel esté listo..."
+  retry kubectl -n kube-flannel wait --for=condition=Available deployment --all --timeout=180s
+  echo -e "${GREEN}✓ Flannel está listo${NC}"
   echo "::endgroup::"
 }
 
@@ -216,17 +168,12 @@ echo "::endgroup::"
 
 wait_for_openapi_ready
 
-echo "::group::Comprobando si Calico ya está instalado"
-if is_calico_installed; then
-  echo -e "${GREEN}✓ Calico ya está instalado${NC}"
-  echo "::endgroup::"
-else
-  echo "Calico no está instalado, procediendo con instalación..."
-  echo "::endgroup::"
-  install_calico
-fi
+echo "::group::Verificando CNI (Flannel)"
+echo -e "${GREEN}✓ Flannel está incluido por defecto en K3s${NC}"
+echo "  Flannel proporciona red superpuesta simple y eficiente"
+echo "::endgroup::"
 
-wait_for_calico_ready
+wait_for_flannel_ready
 wait_for_node_ready
 
 echo "::group::Verificando kubeconfig"
