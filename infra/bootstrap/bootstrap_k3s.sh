@@ -197,8 +197,27 @@ echo "  • CIDR por defecto: 10.42.0.0/16"
 echo "  • Pods namespace: kube-flannel"
 echo ""
 echo "⏳ Aguardando a que Flannel esté listo..."
-retry kubectl -n kube-flannel wait --for=condition=Available deployment --all --timeout=180s
-echo -e "${GREEN}✓ Flannel listo${NC}"
+
+# Verificar que hay pods de Flannel running
+TIMEOUT=180
+ELAPSED=0
+while [ $ELAPSED -lt $TIMEOUT ]; do
+  FLANNEL_RUNNING=$(kubectl get pods -n kube-flannel --field-selector=status.phase=Running --no-headers 2>/dev/null | wc -l)
+  
+  if [ "$FLANNEL_RUNNING" -gt 0 ]; then
+    echo -e "${GREEN}✓ Flannel listo ($FLANNEL_RUNNING pods running)${NC}"
+    break
+  fi
+  
+  echo "  ⏳ Esperando pods de Flannel... ($ELAPSED/$TIMEOUT segundos)"
+  sleep 5
+  ELAPSED=$((ELAPSED + 5))
+done
+
+if [ $ELAPSED -ge $TIMEOUT ]; then
+  echo -e "${YELLOW}⚠️  Timeout esperando Flannel (continuando con verificación de nodo)${NC}"
+fi
+
 echo "::endgroup::"
 
 # 6. Esperar nodo Ready
