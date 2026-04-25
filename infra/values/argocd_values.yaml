@@ -11,6 +11,7 @@ configs:
   params:
     server.insecure: "true"
     repo.server.plaintext: "true"
+    repo.server: "argocd-repo-server:8081"
 
 dex:
   enabled: false
