@@ -56,8 +56,9 @@ if [ "$FETCH_CERT" = "true" ]; then
     echo "  [!] No se pudo descargar del cluster (sealed-secrets podría no estar instalado)"
     
     if [ -f "$CERT_PATH" ]; then
-      echo "  [⚠] Usando certificado local existente"
+      echo "  [✓] Usando certificado local existente"
       echo "      Para actualizar con el del cluster, ejecuta nuevamente después de bootstrap-cluster.yml"
+      DOWNLOAD_SUCCESS=true
     else
       echo "  [!] Certificado local tampoco encontrado en $CERT_PATH"
       echo "      Generando certificado auto-firmado temporal..."
@@ -271,16 +272,71 @@ echo "✓ Secret creado en ${OUT_DIR}/${SECRET_NAME}.raw.yaml"
 echo "::endgroup::"
 
 echo "::group::Sellando Secret con kubeseal (usando clave pública)"
-kubeseal \
+
+# Verificar que el certificado existe y es válido
+if [ ! -f "$CERT_PATH" ]; then
+  echo "[✗] ERROR: Certificado no encontrado en $CERT_PATH"
+  exit 1
+fi
+
+# Verificar que el certificado es válido
+if ! openssl x509 -in "$CERT_PATH" -noout &>/dev/null; then
+  echo "[✗] ERROR: Certificado inválido en $CERT_PATH"
+  echo "  Verifica que es un certificado X509 válido"
+  exit 1
+fi
+
+echo "[i] Certificado validado"
+echo ""
+
+# Ejecutar kubeseal
+if ! kubeseal \
   --cert "$CERT_PATH" \
   --format yaml \
   --scope strict \
   < "${OUT_DIR}/${SECRET_NAME}.raw.yaml" \
-  > "${OUT_DIR}/${SECRET_NAME}.yaml"
+  > "${OUT_DIR}/${SECRET_NAME}.yaml" 2>/tmp/kubeseal.err; then
+  
+  echo "[✗] ERROR: kubeseal falló al sellar el secreto"
+  echo ""
+  echo "Detalles del error:"
+  cat /tmp/kubeseal.err
+  echo ""
+  echo "Debug: Contenido del Secret raw:"
+  head -20 "${OUT_DIR}/${SECRET_NAME}.raw.yaml"
+  
+  exit 1
+fi
 
-# Eliminar cualquier contenido malformado después del SealedSecret válido
-sed -i '/^---$/d' "${OUT_DIR}/${SECRET_NAME}.yaml"
+# Eliminar archivo de error
+rm -f /tmp/kubeseal.err
 
+# Validar que el archivo sellado se generó y tiene contenido
+if [ ! -s "${OUT_DIR}/${SECRET_NAME}.yaml" ]; then
+  echo "[✗] ERROR: El archivo sellado está vacío o no fue creado"
+  exit 1
+fi
+
+# Validar que es YAML válido
+if ! yq eval '.' "${OUT_DIR}/${SECRET_NAME}.yaml" > /dev/null 2>&1; then
+  echo "[✗] ERROR: El archivo sellado no es YAML válido"
+  echo "Contenido:"
+  cat "${OUT_DIR}/${SECRET_NAME}.yaml"
+  exit 1
+fi
+
+# Validar estructura de SealedSecret
+if ! yq eval '.kind' "${OUT_DIR}/${SECRET_NAME}.yaml" 2>/dev/null | grep -q "SealedSecret"; then
+  echo "[✗] ERROR: El archivo no contiene un SealedSecret válido"
+  echo "Kind encontrado:"
+  yq eval '.kind' "${OUT_DIR}/${SECRET_NAME}.yaml" || echo "No hay kind definido"
+  echo ""
+  echo "Contenido completo:"
+  cat "${OUT_DIR}/${SECRET_NAME}.yaml"
+  exit 1
+fi
+
+echo "[✓] SealedSecret válido generado"
 echo "✓ Secret sellado en ${OUT_DIR}/${SECRET_NAME}.yaml"
 echo "::endgroup::"
 

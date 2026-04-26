@@ -329,6 +329,23 @@ jobs:
           fi
           
           # Validar estructura del SealedSecret
+          if ! yq eval '.apiVersion' "$SEALED_SECRET_FILE" 2>/dev/null | grep -q "bitnami.com"; then
+            echo "[✗] ERROR: apiVersion no es válida para SealedSecret"
+            echo "Contenido del archivo:"
+            cat "$SEALED_SECRET_FILE"
+            exit 1
+          fi
+          echo "[✓] apiVersion válido"
+          
+          if ! yq eval '.kind' "$SEALED_SECRET_FILE" 2>/dev/null | grep -q "SealedSecret"; then
+            echo "[✗] ERROR: kind debe ser SealedSecret"
+            echo "Kind encontrado: $(yq eval '.kind' "$SEALED_SECRET_FILE")"
+            exit 1
+          fi
+          echo "[✓] kind válido: SealedSecret"
+          
+          echo "[✓] Estructura de SealedSecret validada"
+          echo "[✓] Secreto listo para aplicar"
           
           echo "::endgroup::"
       
@@ -370,20 +387,6 @@ jobs:
           else
             echo "⚠️  Certificado no encontrado"
           fi
-          
-          echo "::endgroup::"
-          if ! yq eval '.apiVersion' "$SEALED_SECRET_FILE" | grep -q "bitnami.com"; then
-            echo "[✗] ERROR: apiVersion no es válida para SealedSecret"
-            exit 1
-          fi
-          
-          if ! yq eval '.kind' "$SEALED_SECRET_FILE" | grep -q "SealedSecret"; then
-            echo "[✗] ERROR: kind debe ser SealedSecret"
-            exit 1
-          fi
-          
-          echo "[✓] Estructura de SealedSecret validada"
-          echo "[✓] Secreto listo para aplicar"
           
           echo "::endgroup::"
 
