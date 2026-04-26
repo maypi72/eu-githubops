@@ -1,6 +1,4 @@
 # Trivy Operator - Configuración Minimalista
-# Nota: Los valores están definidos inline en application.yaml para mayor control
-# Este archivo se mantiene como referencia
 
 operator:
   scanJobsConcurrentLimit: 2
