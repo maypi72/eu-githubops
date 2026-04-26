@@ -1,0 +1,83 @@
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: trivy-operator
+  namespace: argocd
+spec:
+  project: platform-project
+  source:
+    repoURL: https://aquasecurity.github.io/helm-charts
+    chart: trivy-operator
+    targetRevision: 0.30.1
+    helm:
+      releaseName: trivy-operator
+      values: |
+        operator:
+          scanJobsConcurrentLimit: 2
+          vulnerabilityScannerScanOnlyCurrentRevisions: true
+          configAuditScannerScanOnlyCurrentRevisions: true
+          batchDeleteLimit: 3
+          batchDeleteDelay: 10s
+          resources:
+            requests:
+              cpu: 50m
+              memory: 32Mi
+            limits:
+              cpu: 100m
+              memory: 64Mi
+        
+        trivy:
+          mode: Standalone
+          severity: "HIGH,CRITICAL"
+          ignoreUnfixed: true
+          resources:
+            requests:
+              cpu: 50m
+              memory: 64Mi
+            limits:
+              cpu: 200m
+              memory: 256Mi
+          timeout: 5m
+          skipDirs: "/proc,/sys,/dev,/var"
+        
+        scanners:
+          vulnerability:
+            enabled: true
+          configAudit:
+            enabled: true
+          exposedSecrets:
+            enabled: false
+          rbacAssessment:
+            enabled: false
+          infraAssessment:
+            enabled: false
+          clusterComplianceReport:
+            enabled: false
+        
+        excludeNamespaces: "kube-system,trivy-system,kube-public,kube-node-lease"
+        
+        nodeCollector:
+          enabled: false
+        
+        serviceMonitor:
+          enabled: false
+        
+        trivyOperator:
+          metricsVulnerabilityId: false
+          metricsFindingsEnabled: false
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: trivy-system
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true
+      - ServerSideApply=true
+    retry:
+      limit: 3
+      backoff:
+        duration: 5s
+        factor: 2
+        maxDuration: 3m

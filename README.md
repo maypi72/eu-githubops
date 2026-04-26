@@ -14,6 +14,7 @@ Repository para automatizar el bootstrap y configuración de clusters Kubernetes
   - [Sealed Secrets](#sealed-secrets)
   - [ArgoCD](#argocd)
   - [Argo-Rollouts](#argo-rollouts)
+  - [Trivy-Operator](#trivy-operator)
 - [Seguridad del Workflow Bootstrap](#seguridad-del-workflow-bootstrap)
   - [Kubeconfig](#kubeconfig)
   - [Artifacts](#artifacts)
@@ -558,6 +559,130 @@ argocd-rollouts abort miapp -n default
 # Revertir a versión anterior
 argocd-rollouts undo miapp -n default
 ```
+
+### Trivy-Operator
+
+Trivy-Operator es un operador de seguridad para escanear vulnerabilidades y realizar auditorías de configuración en imágenes de contenedor y recursos del cluster.
+
+#### Configuración Minimalista
+
+**Scanners Activados**:
+- ✅ **Vulnerability Scanning**: Escaneo de vulnerabilidades en imágenes de contenedor
+- ✅ **Config Audit**: Auditoría de configuraciones de Kubernetes
+- ❌ **Exposed Secrets**: Desactivado (optimización de recursos)
+- ❌ **RBAC Assessment**: Desactivado
+- ❌ **Infrastructure Assessment**: Desactivado
+- ❌ **Cluster Compliance Report**: Desactivado
+
+**Límites de Recursos**:
+
+```yaml
+# Operador
+operator:
+  resources:
+    requests:
+      cpu: 50m
+      memory: 32Mi
+    limits:
+      cpu: 100m
+      memory: 64Mi
+
+# Scans de Trivy
+trivy:
+  resources:
+    requests:
+      cpu: 50m
+      memory: 64Mi
+    limits:
+      cpu: 200m
+      memory: 256Mi
+```
+
+#### Configuración de Escaneos
+
+| Parámetro | Valor | Descripción |
+|-----------|-------|-------------|
+| **Severidades** | HIGH, CRITICAL | Ignora LOW y MEDIUM para reducir ruido |
+| **Concurrencia** | 2 jobs | Máximo de escaneos simultáneos |
+| **Revisiones** | Solo actuales | Evita escanear versiones antiguas |
+| **Timeout** | 5m | Límite de tiempo por escaneo |
+| **Modo** | Standalone | No requiere base de datos centralizada |
+
+**Namespaces Excluidos**: 
+```
+kube-system, trivy-system, kube-public, kube-node-lease
+```
+
+#### Despliegue via ArgoCD
+
+**Configuración**:
+```yaml
+Chart: aquasecurity.github.io/helm-charts/trivy-operator
+Versión: 0.30.1
+Namespace: trivy-system
+Sincronización: Automática
+```
+
+**Archivos**:
+- `platform/apps/trivy-operator/application.yaml` - Definición de la aplicación ArgoCD
+- `platform/apps/trivy-operator/values.yaml` - Valores de Helm (referencia)
+
+#### Acceder a Reportes de Escaneo
+
+```bash
+# Ver todos los reports de vulnerabilidades
+kubectl get vulnerabilityreports -n trivy-system
+
+# Ver detalles de un report específico
+kubectl describe vulnerabilityreports -n trivy-system <pod-name>
+
+# Ver reportes de auditoría de configuración
+kubectl get configauditreports -n trivy-system
+
+# Ver detalles de auditoría
+kubectl describe configauditreports -n trivy-system <resource-name>
+
+# Filtrar por namespace
+kubectl get vulnerabilityreports --all-namespaces
+
+# Exportar reportes en JSON
+kubectl get vulnerabilityreports -n trivy-system -o json > vuln-reports.json
+```
+
+#### Ejemplos de Queries
+
+```bash
+# Ver vulnerabilidades críticas
+kubectl get vulnerabilityreports -n trivy-system -o json | \
+  jq '.items[].report.vulnerabilities[] | select(.severity == "CRITICAL")'
+
+# Ver imágenes con vulnerabilidades
+kubectl get vulnerabilityreports -n trivy-system -o json | \
+  jq '.items[] | {name: .metadata.name, image: .report.artifact.ref}'
+
+# Contar vulnerabilidades por severidad
+kubectl get vulnerabilityreports -n trivy-system -o json | \
+  jq '[.items[].report.vulnerabilities[].severity] | group_by(.) | map({severity: .[0], count: length})'
+```
+
+#### Personalización Adicional
+
+Para cambiar la configuración después del despliegue, edita los valores inline en:
+
+```bash
+# Editar la aplicación de ArgoCD
+kubectl patch application trivy-operator -n argocd --type merge -p '{
+  "spec": {
+    "source": {
+      "helm": {
+        "values": "..."
+      }
+    }
+  }
+}'
+```
+
+O modifica directamente en `platform/apps/trivy-operator/application.yaml` y sincroniza con ArgoCD.
 
 ---
 

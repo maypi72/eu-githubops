@@ -9,6 +9,9 @@ spec:
     - https://github.com/maypi72/eu-githubops.git
     - https://argoproj.github.io/argo-helm
     - https://github.io
+    - https://aquasecurity.github.io/helm-charts
+    - https://charts.bitnami.com/bitnami
+    - https://github.com/aquasecurity/helm-charts
   destinations:
     - namespace: "*"
       server: https://kubernetes.default.svc
