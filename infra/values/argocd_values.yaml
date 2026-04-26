@@ -62,7 +62,7 @@ repoServer:
 
   extraArgs:
     - --disable-tls
-    - --enable-helm
+    #- --enable-helm
 
   # Sondas corregidas al puerto 8081 (donde escucha el servicio gRPC sin TLS)
   livenessProbe:
