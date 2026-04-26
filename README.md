@@ -15,6 +15,8 @@ Repository para automatizar el bootstrap y configuración de clusters Kubernetes
   - [ArgoCD](#argocd)
   - [Argo-Rollouts](#argo-rollouts)
   - [Trivy-Operator](#trivy-operator)
+- [Stack de Observabilidad](#stack-de-observabilidad)
+  - [Grafana](#grafana)
 - [Seguridad del Workflow Bootstrap](#seguridad-del-workflow-bootstrap)
   - [Kubeconfig](#kubeconfig)
   - [Artifacts](#artifacts)
@@ -39,6 +41,12 @@ infra/
 │   ├── bootstrap_sealed_secrets.sh         # Instalación de Sealed Secrets
 │   ├── bootstrap_argocd.sh                 # Instalación de ArgoCD
 │   └── bootstrap_clusterissuer.sh          # Configuración de ClusterIssuers
+├── argocd/
+│   └── sealed-secrets/
+│       └── argocd-secret.yaml              # SealedSecret para credenciales de ArgoCD
+├── grafana/
+│   └── sealed-secrets/
+│       └── grafana-admin.yaml              # SealedSecret para credenciales de Grafana
 └── values/
     ├── argocd_values.yaml                  # Configuración para ArgoCD
     ├── cert_manager_values.yaml            # Configuración para Cert-Manager
@@ -685,7 +693,176 @@ kubectl patch application trivy-operator -n argocd --type merge -p '{
 O modifica directamente en `platform/apps/trivy-operator/application.yaml` y sincroniza con ArgoCD.
 
 ---
+## Stack de Observabilidad
 
+Esta sección cubre la configuración e instalación de componentes de observabilidad para monitoreo y visualización del cluster.
+
+### Grafana
+
+**Grafana** es una plataforma de visualización de datos de código abierto que proporciona dashboards para monitorear métricas, logs y trazas del cluster Kubernetes.
+
+#### Preparación Previa al Despliegue
+
+Antes de desplegar el stack de observabilidad, es necesario generar y configurar el SealedSecret de Grafana con las credenciales del usuario administrador.
+
+##### Paso 1: Generar el SealedSecret de Grafana
+
+El script `scripts/gen_grafana_secret.sh` crea un SealedSecret encriptado con las credenciales de Grafana. Este script:
+
+1. Requiere que **Sealed Secrets esté instalado** en el cluster
+2. Descarga o utiliza el certificado público de Sealed Secrets
+3. Genera un hash bcrypt de la contraseña del admin
+4. Crea un SealedSecret encriptado
+
+**Prerrequisitos**:
+- ✅ `kubectl` configurado y funcionando
+- ✅ Cluster Kubernetes con **sealed-secrets** instalado (ejecutar `bootstrap_sealed_secrets.sh` primero)
+- ✅ Herramientas instaladas: `kubeseal`, `openssl`, `base64`, `htpasswd`
+- ✅ Variable de entorno `GRAFANA_ADMIN_PASSWORD` configurada
+
+##### Paso 2: Opción A - Ejecutar el Script Localmente
+
+```bash
+# Desde la raíz del repositorio:
+export GRAFANA_ADMIN_PASSWORD="tu-contraseña-segura"
+./scripts/gen_grafana_secret.sh
+
+# O con descarga de certificado del cluster:
+export GRAFANA_ADMIN_PASSWORD="tu-contraseña-segura"
+FETCH_CERT=true ./scripts/gen_grafana_secret.sh
+```
+
+**Salida esperada**:
+```
+✓ Secreto sellado de Grafana generado correctamente
+
+Archivos actualizados:
+  📄 infra/grafana/sealed-secrets/grafana-admin.yaml
+  📄 infra/sealed-secrets/pub-cert.pem
+
+🚀 Próximos pasos:
+  • Secreto listo para ser aplicado al cluster
+  • El namespace 'grafana' será creado automáticamente al desplegar
+```
+
+##### Paso 3: Opción B - Usar Workflow de GitHub Actions (Recomendado)
+
+Se proporciona un workflow independiente para generar el SealedSecret de forma remota y automatizada:
+
+**Archivo**: [.github/workflows/gen-grafana-secret.yml](.github/workflows/gen-grafana-secret.yml)
+
+**Procedimiento**:
+
+1. **Ir al workflow**:
+   - Ve a **Actions** → **Generate Grafana Secret**
+
+2. **Ejecutar manualmente**:
+   - Click en **"Run workflow"**
+   - Aparecerá un formulario con dos campos:
+
+3. **Llenar los datos**:
+   - **🔐 Contraseña del admin de Grafana**: Ingresa la contraseña segura
+   - **📥 Descargar certificado del cluster** (opcional):
+     - ☐ No marcar si sealed-secrets ya está instalado (usará certificado local)
+     - ☑ Marcar si quieres descargar el certificado del cluster (recomendado después de instalar)
+
+4. **Dejar que se ejecute**:
+   - El workflow:
+     - Descarga el kubeconfig del último artifact de bootstrap
+     - Ejecuta `scripts/gen_grafana_secret.sh` automáticamente
+     - Verifica que el SealedSecret se generó correctamente
+     - Hace commit y push de los cambios
+     - Actualiza el certificado público si es necesario
+
+**Ventajas del Workflow**:
+- ✅ No requiere ejecutar scripts localmente
+- ✅ Ejecuta en el runner de GitHub (ambiente controlado)
+- ✅ Usa kubeconfig del último bootstrap automáticamente
+- ✅ Commit y push automático
+- ✅ Auditado en GitHub Actions logs
+- ✅ Protegido por environment rules
+
+#### Estructura de Archivos
+
+```
+infra/
+└── grafana/
+    ├── sealed-secrets/
+    │   └── grafana-admin.yaml              # SealedSecret (encriptado)
+    └── values.yaml                         # Valores de Helm para Grafana (por crear)
+
+platform/
+└── apps/
+    └── grafana/                            # (por crear)
+        ├── application.yaml                # Definición de ArgoCD
+        └── values.yaml                     # Configuración de Grafana
+```
+
+#### Configuración de Grafana
+
+**Parámetros Principales**:
+
+| Parámetro | Valor | Descripción |
+|-----------|-------|-------------|
+| **Namespace** | `grafana` | Espacio dedicado para Grafana |
+| **Replicas** | 1 | Una instancia de Grafana |
+| **Persistencia** | PVC | Almacenamiento persistente para dashboards |
+| **Ingress** | Habilitado | Acceso HTTP/HTTPS externo |
+| **Resources** | Límites | CPU: 200m, RAM: 256Mi |
+
+**Admin Credentials**:
+- **Usuario**: `admin` (almacenado en SealedSecret)
+- **Contraseña**: Encriptada en `grafana-admin.yaml`
+
+#### Acceder a Grafana
+
+```bash
+# 1. Ver el servicio
+kubectl get svc -n grafana
+
+# 2. Portforward (si no tiene Ingress)
+kubectl port-forward -n grafana svc/grafana 3000:80
+
+# 3. Acceder en el navegador
+# http://localhost:3000
+# Usuario: admin
+# Contraseña: (la que configuraste en GRAFANA_ADMIN_PASSWORD)
+```
+
+#### Dashboards Recomendados
+
+Grafana viene con dashboards preconfigurados:
+
+1. **Kubernetes Cluster Monitoring** - Métricas generales del cluster
+2. **Pod Monitoring** - Detalles de pods individuales
+3. **Node Exporter** - Métricas de nodos
+4. **Prometheus Stats** - Estado de Prometheus
+
+#### Fuentes de Datos
+
+Grafana se conecta automáticamente a:
+
+1. **Prometheus** - Métricas del cluster
+2. **Loki** (opcional) - Agregación de logs
+3. **Jaeger** (opcional) - Tracing distribuido
+
+#### Troubleshooting
+
+```bash
+# Ver logs de Grafana
+kubectl logs -n grafana -f deployment/grafana
+
+# Verificar SealedSecret
+kubectl get sealedsecret -n grafana
+
+# Verificar Secret desencriptado
+kubectl get secret -n grafana grafana-admin -o yaml
+
+# Resetear contraseña de admin
+kubectl exec -n grafana deployment/grafana -- grafana-cli admin reset-admin-password nueva-contraseña
+```
+
+---
 ## Seguridad del Workflow Bootstrap
 
 Esta sección describe las medidas de seguridad implementadas en el workflow `bootstrap-cluster.yml`.
