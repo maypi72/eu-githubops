@@ -751,23 +751,32 @@ Se proporciona un workflow independiente para generar el SealedSecret de forma r
 
 **Archivo**: [.github/workflows/gen-grafana-secret.yml](.github/workflows/gen-grafana-secret.yml)
 
+**Requisitos previos**:
+- El secreto `GRAFANA_ADMIN_PASSWORD` debe estar configurado en GitHub
+  - Ve a **Settings → Secrets and variables → Actions**
+  - Crea un nuevo secreto llamado `GRAFANA_ADMIN_PASSWORD`
+  - Ingresa la contraseña de admin para Grafana
+
 **Procedimiento**:
 
-1. **Ir al workflow**:
-   - Ve a **Actions** → **Generate Grafana Secret**
+1. **Configurar el secreto en GitHub** (una sola vez):
+   - Ve a **Settings → Secrets and variables → Actions**
+   - Click en **"New repository secret"**
+   - Nombre: `GRAFANA_ADMIN_PASSWORD`
+   - Valor: Tu contraseña de admin para Grafana
+   - Click **"Add secret"**
 
-2. **Ejecutar manualmente**:
+2. **Ejecutar el workflow**:
+   - Ve a **Actions → Generate Grafana Secret**
    - Click en **"Run workflow"**
-   - Aparecerá un formulario con dos campos:
+   - Aparecerá un formulario con solo una opción:
+     - **📥 Descargar certificado del cluster** (checkbox):
+       - ☐ No marcar si sealed-secrets ya está instalado (usará certificado local)
+       - ☑ Marcar si quieres descargar el certificado del cluster (recomendado después de instalar)
 
-3. **Llenar los datos**:
-   - **🔐 Contraseña del admin de Grafana**: Ingresa la contraseña segura
-   - **📥 Descargar certificado del cluster** (opcional):
-     - ☐ No marcar si sealed-secrets ya está instalado (usará certificado local)
-     - ☑ Marcar si quieres descargar el certificado del cluster (recomendado después de instalar)
-
-4. **Dejar que se ejecute**:
+3. **Dejar que se ejecute**:
    - El workflow:
+     - Obtiene automáticamente la contraseña del secreto de GitHub Actions
      - Descarga el kubeconfig del último artifact de bootstrap
      - Ejecuta `scripts/gen_grafana_secret.sh` automáticamente
      - Verifica que el SealedSecret se generó correctamente
@@ -775,6 +784,8 @@ Se proporciona un workflow independiente para generar el SealedSecret de forma r
      - Actualiza el certificado público si es necesario
 
 **Ventajas del Workflow**:
+- ✅ No requiere escribir contraseña cada vez
+- ✅ Usa secreto de GitHub de forma segura (no visible en logs)
 - ✅ No requiere ejecutar scripts localmente
 - ✅ Ejecuta en el runner de GitHub (ambiente controlado)
 - ✅ Usa kubeconfig del último bootstrap automáticamente
