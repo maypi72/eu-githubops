@@ -52,14 +52,14 @@ spec:
             annotations:
               cert-manager.io/cluster-issuer: mygitops-ca
             hosts:
-              - host: rollouts.local
-                paths:
-                  - path: /
-                    pathType: Prefix
+              - "rollouts.local"
+            paths:
+              - path: /
+                pathType: Prefix
             tls:
               - secretName: rollouts-tls
                 hosts:
-                  - rollouts.local
+                  - "rollouts.local"
 
         rbac:
           create: true
