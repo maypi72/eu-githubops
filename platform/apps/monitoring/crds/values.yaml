@@ -1,0 +1,13 @@
+grafana:
+  enabled: false
+
+prometheus:
+  enabled: false
+
+alertmanager:
+  enabled: false
+
+prometheusOperator:
+  enabled: true
+  admissionWebhooks:
+    enabled: true

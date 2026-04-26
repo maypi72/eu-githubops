@@ -1,0 +1,19 @@
+prometheus:
+  enabled: false
+
+alertmanager:
+  enabled: false
+
+grafana:
+  enabled: true
+
+  admin:
+    existingSecret: grafana-admin
+    existingSecretPasswordKey: admin-password
+
+  persistence:
+    enabled: true
+    size: 5Gi
+
+  service:
+    type: ClusterIP
