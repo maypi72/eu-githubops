@@ -382,7 +382,11 @@ kind: Secret
 metadata:
   name: ${SECRET_NAME}
   namespace: ${NAMESPACE}
+  labels:
+    app.kubernetes.io/managed-by: Helm
   annotations:
+    meta.helm.sh/release-name: argocd
+    meta.helm.sh/release-namespace: argocd
     argocd.argoproj.io/sync-wave: "0"
 type: Opaque
 data:
