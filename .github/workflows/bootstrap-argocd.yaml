@@ -3,18 +3,49 @@ name: Bootstrap ArgoCD
 # Este workflow configura ArgoCD en el cluster Kubernetes
 # REQUISITO: Debe existir el GitHub Secret ARGOCD_ADMIN_PASSWORD
 # Crear en: Settings > Secrets and variables > Actions > New repository secret
+#
+# 📥 INPUT: fetch_cert
+#   • true:  Descargar certificado público del cluster (sealed-secrets)
+#            └─ Crea/sobrescribe infra/sealed-secrets/pub-cert.pem
+#            └─ Hace commit y push automáticamente
+#   • false: Usa certificado local o genera temporal auto-firmado
+#
+# ⚙️ INPUT: apply_sealed_secret
+#   • true:  Aplica el secreto AL CLUSTER (cuando cambias contraseña)
+#            └─ Úsalo para nuevas instalaciones o cambios de contraseña
+#   • false: Solo genera/actualiza archivos en repositorio (SIN aplicar al cluster)
+#            └─ Úsalo para upgrades, actualizaciones de certificado, etc.
+#
+# 📋 Casos de uso comunes:
+#
+#   1. NUEVA INSTALACIÓN (después de bootstrap-cluster.yml):
+#      fetch_cert: true    (obtener certificado real del cluster)
+#      apply_sealed_secret: true  (aplicar secreto al cluster)
+#
+#   2. UPGRADE DE ARGOCD (sin cambiar contraseña):
+#      fetch_cert: false   (mantener certificado actual)
+#      apply_sealed_secret: false  (no cambiar secret en cluster)
+#
+#   3. CAMBIAR CONTRASEÑA (con cluster existente):
+#      fetch_cert: false   (mantener certificado actual)
+#      apply_sealed_secret: true   (aplicar nueva contraseña al cluster)
+#
+#   4. ACTUALIZAR CERTIFICADO (cambio de sealed-secrets):
+#      fetch_cert: true    (obtener nuevo certificado)
+#      apply_sealed_secret: false  (no aplicar secret, solo actualizar .pem)
+#
 on:
   workflow_dispatch:
     inputs:
       fetch_cert:
-        description: 'Descargar/actualizar certificado público del cluster (FETCH_CERT)'
+        description: '📥 Descargar certificado del cluster Y actualizar .pem en repo (crear/sobrescribir)'
         required: false
         default: false
         type: boolean
       apply_sealed_secret:
-        description: 'Aplicar el secreto sellado después de instalar ArgoCD'
+        description: '⚙️ Aplicar secreto al cluster (solo si cambió la contraseña) [¡desmarcar para upgrades sin cambios!]'
         required: false
-        default: true
+        default: false
         type: boolean
 
 permissions:
@@ -41,6 +72,56 @@ jobs:
         with:
           fetch-depth: 0
           token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Display Operation Mode
+        run: |
+          echo "::group::📋 Modo de operación"
+          echo ""
+          echo "Configuración seleccionada:"
+          echo ""
+          
+          if [ "${{ inputs.fetch_cert }}" == "true" ]; then
+            echo "📥 fetch_cert = true"
+            echo "   └─ Descargará certificado del cluster (sealed-secrets)"
+            echo "   └─ Guardará en: infra/sealed-secrets/pub-cert.pem"
+            echo "   └─ Hará commit y push al repositorio"
+            echo ""
+          else
+            echo "📥 fetch_cert = false"
+            echo "   └─ Usará certificado local existente"
+            echo "   └─ Si no existe: generará certificado temporal auto-firmado"
+            echo ""
+          fi
+          
+          if [ "${{ inputs.apply_sealed_secret }}" == "true" ]; then
+            echo "⚙️ apply_sealed_secret = true"
+            echo "   └─ Aplicará el secreto al cluster INMEDIATAMENTE"
+            echo "   └─ ✅ Úsalo cuando: cambies la contraseña de ArgoCD"
+            echo ""
+          else
+            echo "⚙️ apply_sealed_secret = false"
+            echo "   └─ NO aplicará el secreto al cluster"
+            echo "   └─ Solo actualiza el repositorio"
+            echo "   └─ ✅ Úsalo cuando:"
+            echo "      • Upgrade de ArgoCD (sin cambiar password)"
+            echo "      • Actualizar certificado (sin cambiar password)"
+            echo "      • Re-generar secreto (sin cambios reales)"
+            echo ""
+          fi
+          
+          echo "Resumen:"
+          if [ "${{ inputs.fetch_cert }}" == "true" ] && [ "${{ inputs.apply_sealed_secret }}" == "true" ]; then
+            echo "  🔄 Completo: descarga cert + actualiza secret en cluster"
+          elif [ "${{ inputs.fetch_cert }}" == "true" ] && [ "${{ inputs.apply_sealed_secret }}" == "false" ]; then
+            echo "  📥 Solo cert: descarga certificado y lo sube al repo"
+          elif [ "${{ inputs.fetch_cert }}" == "false" ] && [ "${{ inputs.apply_sealed_secret }}" == "true" ]; then
+            echo "  ⚙️ Solo secret: genera secreto con cert local y lo aplica"
+          else
+            echo "  🔍 Inspección: regenera archivos sin aplicar cambios"
+          fi
+          
+          echo ""
+          echo "::endgroup::"
 
       - name: Download kubeconfig artifact (optional)
         id: download-artifact
@@ -248,6 +329,49 @@ jobs:
           fi
           
           # Validar estructura del SealedSecret
+          
+          echo "::endgroup::"
+      
+      - name: Verify Certificate Status
+        if: always()
+        run: |
+          echo "::group::Verificando estado del certificado"
+          
+          CERT_PATH="infra/sealed-secrets/pub-cert.pem"
+          
+          if [ -f "$CERT_PATH" ]; then
+            echo "✓ Certificado disponible en: $CERT_PATH"
+            echo ""
+            
+            # Verificar si es auto-firmado (temporal)
+            if openssl x509 -in "$CERT_PATH" -noout -subject 2>/dev/null | grep -q "sealed-secrets-temp"; then
+              echo "⚠️  INFORMACIÓN: Usando certificado auto-firmado TEMPORAL"
+              echo ""
+              echo "Razón: Sealed-Secrets no está instalado en el cluster o no es accesible"
+              echo ""
+              echo "📋 Próximos pasos:"
+              echo "  1. Ejecutar 'bootstrap-cluster.yml' para instalar sealed-secrets"
+              echo "  2. Una vez instalado, re-ejecutar bootstrap-argocd.yaml con:"
+              echo "     • fetch_cert = true"
+              echo "     Para obtener el certificado del cluster y actualizar el secreto"
+              echo ""
+              echo "⚠️  Mientras tanto, el secreto está sellado con certificado temporal"
+            else
+              # Obtener información del certificado
+              ISSUER=$(openssl x509 -in "$CERT_PATH" -noout -issuer 2>/dev/null | cut -d' ' -f2-)
+              SUBJECT=$(openssl x509 -in "$CERT_PATH" -noout -subject 2>/dev/null | cut -d' ' -f2-)
+              EXPIRY=$(openssl x509 -in "$CERT_PATH" -noout -enddate 2>/dev/null | cut -d'=' -f2)
+              
+              echo "✓ Certificado válido (desde cluster)"
+              echo "  • Issuer: $ISSUER"
+              echo "  • Subject: $SUBJECT"
+              echo "  • Expira: $EXPIRY"
+            fi
+          else
+            echo "⚠️  Certificado no encontrado"
+          fi
+          
+          echo "::endgroup::"
           if ! yq eval '.apiVersion' "$SEALED_SECRET_FILE" | grep -q "bitnami.com"; then
             echo "[✗] ERROR: apiVersion no es válida para SealedSecret"
             exit 1
@@ -320,20 +444,29 @@ jobs:
         if: success() && steps.generate-secret.outputs.secret_generated == 'true'
         timeout-minutes: 5
         run: |
-          echo "::group::Aplicando secreto sellado de ArgoCD"
+          echo "::group::⚙️ Aplicando secreto sellado de ArgoCD"
           
           export KUBECONFIG
           
           SEALED_SECRET_FILE="infra/argocd/sealed-secrets/argocd-secret.yaml"
           SHOULD_APPLY="${{ inputs.apply_sealed_secret }}"
           
-          if [ "$SHOULD_APPLY" != "false" ]; then
-            echo "apply_sealed_secret está habilitado (default: true)"
-          else
-            echo "[!] apply_sealed_secret está deshabilitado, skipping..."
+          if [ "$SHOULD_APPLY" != "true" ]; then
+            echo "ℹ️  apply_sealed_secret está DESHABILITADO"
+            echo ""
+            echo "Secreto generado pero NO será aplicado al cluster."
+            echo ""
+            echo "📝 El secreto está listo en:"
+            echo "   • Repositorio: infra/argocd/sealed-secrets/argocd-secret.yaml"
+            echo "   • Puedes aplicarlo manualmente después con: kubectl apply -f ..."
+            echo ""
+            echo "⚙️  Para aplicar automáticamente después: marca apply_sealed_secret=true"
             echo "::endgroup::"
             exit 0
           fi
+          
+          echo "ℹ️  apply_sealed_secret está HABILITADO - aplicando al cluster..."
+          echo ""
           
           if [ -f "$SEALED_SECRET_FILE" ]; then
             echo "[✓] Archivo de secreto sellado encontrado: $SEALED_SECRET_FILE"

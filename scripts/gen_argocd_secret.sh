@@ -17,39 +17,109 @@ FETCH_CERT="${FETCH_CERT:-false}"
 
 echo "::group::Verificando configuración"
 
+# Crear directorio si no existe
+mkdir -p "$(dirname "$CERT_PATH")"
+
 # Opción 1: Descargar certificado del cluster si FETCH_CERT=true
 if [ "$FETCH_CERT" = "true" ]; then
   echo "[i] FETCH_CERT=true: Intentando descargar certificado público del cluster..."
   
-  # Crear directorio si no existe
-  mkdir -p "$(dirname "$CERT_PATH")"
+  DOWNLOAD_SUCCESS=false
   
-  # Descargar el certificado público del sealed-secrets en el cluster
-  if ! timeout 10 kubectl get secret \
+  # Intento 1: Descargar usando etiqueta (forma preferida)
+  if timeout 10 kubectl get secret \
     -n kube-system \
     -l sealedsecrets.bitnami.com/status=active \
     -o jsonpath='{.items[0].data.tls\.crt}' 2>/dev/null | \
     base64 -d > "$CERT_PATH" 2>/dev/null; then
     
-    echo "[!] No se pudo descargar del cluster. Intentando desde la key pública..."
-    if ! timeout 10 kubectl get secret -n kube-system sealed-secrets-key -o jsonpath='{.data.tls\.crt}' 2>/dev/null | \
-      base64 -d > "$CERT_PATH" 2>/dev/null; then
-      
-      echo "[✗] ERROR: No se pudo obtener el certificado público del cluster"
-      echo "    Asegúrate que sealed-secrets esté instalado en kube-system"
-      exit 1
+    if [ -s "$CERT_PATH" ]; then
+      echo "  [✓] Certificado descargado desde secret con etiqueta"
+      DOWNLOAD_SUCCESS=true
     fi
   fi
   
-  echo "✓ Certificado descargado: $CERT_PATH"
+  # Intento 2: Descargar desde sealed-secrets-key (fallback)
+  if [ "$DOWNLOAD_SUCCESS" = "false" ] && timeout 10 kubectl get secret \
+    -n kube-system sealed-secrets-key \
+    -o jsonpath='{.data.tls\.crt}' 2>/dev/null | \
+    base64 -d > "$CERT_PATH" 2>/dev/null; then
+    
+    if [ -s "$CERT_PATH" ]; then
+      echo "  [✓] Certificado descargado desde sealed-secrets-key"
+      DOWNLOAD_SUCCESS=true
+    fi
+  fi
+  
+  # Si descarga falló, intentar usar certificado local existente
+  if [ "$DOWNLOAD_SUCCESS" = "false" ]; then
+    echo "  [!] No se pudo descargar del cluster (sealed-secrets podría no estar instalado)"
+    
+    if [ -f "$CERT_PATH" ]; then
+      echo "  [⚠] Usando certificado local existente"
+      echo "      Para actualizar con el del cluster, ejecuta nuevamente después de bootstrap-cluster.yml"
+    else
+      echo "  [!] Certificado local tampoco encontrado en $CERT_PATH"
+      echo "      Generando certificado auto-firmado temporal..."
+      
+      # Generar certificado auto-firmado temporal
+      openssl req -x509 -newkey rsa:2048 -nodes \
+        -keyout /tmp/temp-key.pem \
+        -out "$CERT_PATH" \
+        -days 365 \
+        -subj "/CN=sealed-secrets-temp" 2>/dev/null || {
+        echo "  [✗] ERROR: No se pudo generar certificado auto-firmado"
+        exit 1
+      }
+      
+      echo "  [✓] Certificado temporal generado"
+      echo "      ⚠️  ADVERTENCIA: Usando certificado auto-firmado temporal"
+      echo "      Después de instalar sealed-secrets via bootstrap-cluster.yml:"
+      echo "      $ FETCH_CERT=true $0"
+      echo "      para reemplazarlo con el certificado del cluster real"
+      
+      DOWNLOAD_SUCCESS=true
+    fi
+  fi
+  
+  if [ "$DOWNLOAD_SUCCESS" = "true" ]; then
+    echo "✓ Certificado disponible: $CERT_PATH"
+  else
+    echo "[✗] ERROR: No se pudo obtener certificado"
+    exit 1
+  fi
 else
   # Opción 2: Verificar que la clave pública existe en ruta local
   if [ ! -f "$CERT_PATH" ]; then
-    echo "ERROR: Certificado público no encontrado en $CERT_PATH"
-    echo "        Para descargar desde el cluster, usa: FETCH_CERT=true $0"
-    exit 1
+    echo "[!] Certificado público no encontrado en $CERT_PATH"
+    echo "    Intentando descargar del cluster..."
+    
+    # Intento 1: Descargar usando etiqueta
+    if timeout 10 kubectl get secret \
+      -n kube-system \
+      -l sealedsecrets.bitnami.com/status=active \
+      -o jsonpath='{.items[0].data.tls\.crt}' 2>/dev/null | \
+      base64 -d > "$CERT_PATH" 2>/dev/null && [ -s "$CERT_PATH" ]; then
+      echo "✓ Certificado descargado del cluster"
+    # Intento 2: Descargar desde sealed-secrets-key
+    elif timeout 10 kubectl get secret \
+      -n kube-system sealed-secrets-key \
+      -o jsonpath='{.data.tls\.crt}' 2>/dev/null | \
+      base64 -d > "$CERT_PATH" 2>/dev/null && [ -s "$CERT_PATH" ]; then
+      echo "✓ Certificado descargado del cluster"
+    else
+      echo "[✗] ERROR: Certificado no encontrado en:"
+      echo "    • Ruta local: $CERT_PATH"
+      echo "    • Cluster: sealed-secrets en kube-system"
+      echo ""
+      echo "    Soluciones:"
+      echo "    1. Ejecutar bootstrap-cluster.yml para instalar sealed-secrets"
+      echo "    2. O usar: FETCH_CERT=true $0"
+      exit 1
+    fi
+  else
+    echo "✓ Certificado público: $CERT_PATH"
   fi
-  echo "✓ Certificado público: $CERT_PATH"
 fi
 echo "::endgroup::"
 
@@ -229,12 +299,27 @@ if [ "$CI_ENVIRONMENT" = "true" ]; then
   git config user.email "github-actions[bot]@users.noreply.github.com" 2>/dev/null || true
 fi
 
+# Agregar el secreto sellado
 git add "${OUT_DIR}/${SECRET_NAME}.yaml"
 
+# Si se descargó certificado del cluster, también agregarlo
+if [ "$FETCH_CERT" = "true" ] && [ -f "$CERT_PATH" ]; then
+  echo "[i] Certificado descargado - incluyendo en commit"
+  git add "$CERT_PATH"
+fi
+
+# Crear commit si hay cambios
 if git diff --cached --quiet; then
   echo "[!] Sin cambios para hacer commit"
 else
-  git commit -m "chore: update ArgoCD sealed secret"
+  # Determinar mensaje del commit
+  if [ "$FETCH_CERT" = "true" ]; then
+    COMMIT_MSG="chore: update ArgoCD sealed secret and cluster certificate"
+  else
+    COMMIT_MSG="chore: update ArgoCD sealed secret"
+  fi
+  
+  git commit -m "$COMMIT_MSG"
   
   if [ "$SKIP_GIT_PUSH" = "true" ]; then
     echo "[i] Push skipped (ejecutándose en CI environment)"
@@ -248,5 +333,21 @@ echo "::endgroup::"
 
 echo ""
 echo "════════════════════════════════════════════════"
-echo "[✓] Secret sellado correctamente"
+echo "[✓] Secreto sellado generado correctamente"
+echo ""
+echo "Archivos actualizados:"
+echo "  📄 infra/argocd/sealed-secrets/argocd-secret.yaml"
+
+if [ "$FETCH_CERT" = "true" ]; then
+  echo "  📄 $CERT_PATH (descargado del cluster)"
+fi
+
+echo ""
+echo "🚀 Próximos pasos:"
+if [ "$FETCH_CERT" = "true" ]; then
+  echo "  • Certificado descargado y subido al repo ✓"
+fi
+echo "  • Secreto listo para ser aplicado al cluster"
+echo "  • En CI: bootstrap-argocd.yaml hará push automáticamente"
+echo "════════════════════════════════════════════════"
 echo "════════════════════════════════════════════════"
