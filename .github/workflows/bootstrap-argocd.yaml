@@ -6,6 +6,11 @@ name: Bootstrap ArgoCD
 on:
   workflow_dispatch:
     inputs:
+      fetch_cert:
+        description: 'Descargar/actualizar certificado público del cluster (FETCH_CERT)'
+        required: false
+        default: false
+        type: boolean
       apply_sealed_secret:
         description: 'Aplicar el secreto sellado después de instalar ArgoCD'
         required: false
@@ -186,8 +191,14 @@ jobs:
         id: generate-secret
         env:
           ARGOCD_ADMIN_PASSWORD: ${{ secrets.ARGOCD_ADMIN_PASSWORD }}
+          FETCH_CERT: ${{ inputs.fetch_cert }}
         run: |
           echo "::group::Generando secreto sellado de ArgoCD"
+          
+          # Mostrar configuración
+          echo "[i] Configuración:"
+          echo "    FETCH_CERT: $FETCH_CERT"
+          echo ""
           
           # Verificar que la contraseña está configurada
           if [ -z "$ARGOCD_ADMIN_PASSWORD" ]; then

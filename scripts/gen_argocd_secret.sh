@@ -12,14 +12,45 @@ CERT_PATH="infra/sealed-secrets/pub-cert.pem"
 CI_ENVIRONMENT="${CI:-false}"
 SKIP_GIT_PUSH="${SKIP_GIT_PUSH:-${CI_ENVIRONMENT}}"
 
+# Nueva variable para forzar la actualización del certificado público si es necesario
+FETCH_CERT="${FETCH_CERT:-false}"
+
 echo "::group::Verificando configuración"
 
-# Verificar que la clave pública existe
-if [ ! -f "$CERT_PATH" ]; then
-  echo "ERROR: Certificado público no encontrado en $CERT_PATH"
-  exit 1
+# Opción 1: Descargar certificado del cluster si FETCH_CERT=true
+if [ "$FETCH_CERT" = "true" ]; then
+  echo "[i] FETCH_CERT=true: Intentando descargar certificado público del cluster..."
+  
+  # Crear directorio si no existe
+  mkdir -p "$(dirname "$CERT_PATH")"
+  
+  # Descargar el certificado público del sealed-secrets en el cluster
+  if ! timeout 10 kubectl get secret \
+    -n kube-system \
+    -l sealedsecrets.bitnami.com/status=active \
+    -o jsonpath='{.items[0].data.tls\.crt}' 2>/dev/null | \
+    base64 -d > "$CERT_PATH" 2>/dev/null; then
+    
+    echo "[!] No se pudo descargar del cluster. Intentando desde la key pública..."
+    if ! timeout 10 kubectl get secret -n kube-system sealed-secrets-key -o jsonpath='{.data.tls\.crt}' 2>/dev/null | \
+      base64 -d > "$CERT_PATH" 2>/dev/null; then
+      
+      echo "[✗] ERROR: No se pudo obtener el certificado público del cluster"
+      echo "    Asegúrate que sealed-secrets esté instalado en kube-system"
+      exit 1
+    fi
+  fi
+  
+  echo "✓ Certificado descargado: $CERT_PATH"
+else
+  # Opción 2: Verificar que la clave pública existe en ruta local
+  if [ ! -f "$CERT_PATH" ]; then
+    echo "ERROR: Certificado público no encontrado en $CERT_PATH"
+    echo "        Para descargar desde el cluster, usa: FETCH_CERT=true $0"
+    exit 1
+  fi
+  echo "✓ Certificado público: $CERT_PATH"
 fi
-echo "✓ Certificado público: $CERT_PATH"
 echo "::endgroup::"
 
 echo "::group::Comprobando directorio de salida"
@@ -57,6 +88,12 @@ if ! command -v yq &> /dev/null; then
 fi
 echo "✓ yq disponible"
 
+if ! command -v jq &> /dev/null; then
+  echo "[!] jq no encontrado. Instalando..."
+  sudo apt-get update && sudo apt-get install -y jq
+fi
+echo "✓ jq disponible"
+
 if ! command -v kubeseal &> /dev/null; then
   echo "[!] kubeseal no encontrado. Instalando..."
   KUBESEAL_TMP=$(mktemp -d)
@@ -79,9 +116,49 @@ htpasswd=$(htpasswd -bnBC 10 "" "$ARGOCD_ADMIN_PASSWORD" | tr -d ':\n')
 echo "✓ Hash bcrypt generado"
 echo "::endgroup::"
 
-echo "::group::Creando Secret local"
+echo "::group::Creando Secret local (con merge de campos existentes)"
+
 # Generar una clave de servidor aleatoria
 SERVER_SECRET_KEY=$(openssl rand -base64 32)
+
+# Intentar obtener el Secret existente para hacer merge
+EXISTING_DATA="{}"
+PERFORM_MERGE=false
+
+if [ "$CI_ENVIRONMENT" != "true" ]; then
+  # Solo en entorno local intentamos obtener el secret actual
+  echo "[i] Intentando obtener Secret actual para hacer merge..."
+  
+  # Intentar extraer el Secret desencriptado del cluster
+  if timeout 5 kubectl get secret "$SECRET_NAME" -n "$NAMESPACE" -o json 2>/dev/null | \
+    jq '.data' 2>/dev/null > /tmp/existing_data.json; then
+    
+    if [ -s /tmp/existing_data.json ] && grep -q "." /tmp/existing_data.json; then
+      # Convertir los datos base64 existentes a un objeto JSON decodificado
+      EXISTING_DATA=$(jq 'to_entries | map({(.key): (.value | @base64d)}) | add' /tmp/existing_data.json 2>/dev/null || echo "{}")
+      
+      if [ "$EXISTING_DATA" != "{}" ] && [ "$EXISTING_DATA" != "null" ]; then
+        echo "  [✓] Secret actual encontrado - realizando merge"
+        PERFORM_MERGE=true
+        
+        # Preservar campos que no vamos a actualizar (excepto admin.password y admin.passwordMtime)
+        echo "  [i] Campos a preservar (no se actualizan):"
+        echo "$EXISTING_DATA" | jq 'keys[]' 2>/dev/null | grep -v "admin.password" | grep -v "admin.passwordMtime" || true
+      else
+        echo "  [i] Secret actual vacío o no válido - creando nuevo"
+      fi
+    else
+      echo "  [i] Secret actual no encontrado - creando nuevo"
+    fi
+  else
+    echo "  [i] No se pudo obtener Secret actual - creando nuevo"
+  fi
+  rm -f /tmp/existing_data.json 2>/dev/null || true
+else
+  echo "[i] En CI environment - creando Secret sin merge"
+fi
+
+# Crear base de datos con los valores nuevos
 cat <<EOF > "${OUT_DIR}/${SECRET_NAME}.raw.yaml"
 apiVersion: v1
 kind: Secret
@@ -96,7 +173,31 @@ data:
   admin.passwordMtime: $(date -u +"%Y-%m-%dT%H:%M:%SZ" | base64 -w0)
   server.secretkey: $(echo -n "$SERVER_SECRET_KEY" | base64 -w0)
 EOF
-echo "✓ Secret creado con en ${OUT_DIR}/${SECRET_NAME}.raw.yaml"
+
+# Si hay datos existentes para mergeado, agregarlos al Secret (excepto los que ya actualizamos)
+if [ "$PERFORM_MERGE" = "true" ] && [ "$EXISTING_DATA" != "{}" ] && [ "$EXISTING_DATA" != "null" ]; then
+  echo "  [✓] Fusionando campos existentes..."
+  
+  # Usar yq para agregar los campos existentes que no estamos actualizando
+  TEMP_YAML="/tmp/${SECRET_NAME}.merge.yaml"
+  cp "${OUT_DIR}/${SECRET_NAME}.raw.yaml" "$TEMP_YAML"
+  
+  # Para cada campo del Secret existente que no sea admin.password o admin.passwordMtime
+  echo "$EXISTING_DATA" | jq -r 'to_entries[] | select(.key != "admin.password" and .key != "admin.passwordMtime") | .key + "=" + (.value | @base64)' | while IFS='=' read -r key value; do
+    echo "  • Preservando: $key"
+    yq eval ".data.\"$key\" = \"$value\"" -i "$TEMP_YAML"
+  done
+  
+  # Reemplazar el archivo raw con la versión mergeada
+  mv "$TEMP_YAML" "${OUT_DIR}/${SECRET_NAME}.raw.yaml"
+  echo "  [✓] Merge completado"
+else
+  if [ "$PERFORM_MERGE" = "true" ]; then
+    echo "  [!] No se pudo realizar merge, usando nuevos valores"
+  fi
+fi
+
+echo "✓ Secret creado en ${OUT_DIR}/${SECRET_NAME}.raw.yaml"
 echo "::endgroup::"
 
 echo "::group::Sellando Secret con kubeseal (usando clave pública)"

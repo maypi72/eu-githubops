@@ -1,7 +1,6 @@
 # Configuración optimizada para K3s en Laboratorio
 controller:
   kind: DaemonSet
-  # Publica 80/443 en el nodo para poder acceder por argocd.local sin NodePort ni LoadBalancer.
   hostNetwork: false
   dnsPolicy: ClusterFirst
   hostPort:
@@ -10,7 +9,6 @@ controller:
     type: ClusterIP
   admissionWebhooks:
     enabled: false
-  # Recursos recomendados para evitar que consuma mucho en la VM
   resources:
     requests:
       cpu: 100m
