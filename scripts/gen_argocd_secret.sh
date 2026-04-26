@@ -20,35 +20,46 @@ echo "::group::Verificando configuración"
 # Crear directorio si no existe
 mkdir -p "$(dirname "$CERT_PATH")"
 
+# IMPORTANTE: Limpiar certificado inválido si existe
+if [ -f "$CERT_PATH" ]; then
+  if ! openssl x509 -in "$CERT_PATH" -noout &>/dev/null; then
+    echo "[!] Certificado inválido detectado y será regenerado"
+    rm -f "$CERT_PATH"
+  fi
+fi
+
 # Opción 1: Descargar certificado del cluster si FETCH_CERT=true
 if [ "$FETCH_CERT" = "true" ]; then
   echo "[i] FETCH_CERT=true: Intentando descargar certificado público del cluster..."
   
   DOWNLOAD_SUCCESS=false
   
-  # Intento 1: Descargar usando etiqueta (forma preferida)
-  if timeout 10 kubectl get secret \
+  # Intento 1: Usar kubeseal --fetch-cert (método oficial y más simple)
+  if timeout 10 kubeseal --fetch-cert \
+    --controller-name=sealed-secrets \
+    --controller-namespace=kube-system \
+    > "$CERT_PATH" 2>/dev/null && [ -s "$CERT_PATH" ]; then
+    echo "  [✓] Certificado descargado con kubeseal --fetch-cert"
+    DOWNLOAD_SUCCESS=true
+  fi
+  
+  # Intento 2: Descargar usando etiqueta de kubectl (fallback si kubeseal falla)
+  if [ "$DOWNLOAD_SUCCESS" = "false" ] && timeout 10 kubectl get secret \
     -n kube-system \
     -l sealedsecrets.bitnami.com/status=active \
     -o jsonpath='{.items[0].data.tls\.crt}' 2>/dev/null | \
-    base64 -d > "$CERT_PATH" 2>/dev/null; then
-    
-    if [ -s "$CERT_PATH" ]; then
-      echo "  [✓] Certificado descargado desde secret con etiqueta"
-      DOWNLOAD_SUCCESS=true
-    fi
+    base64 -d > "$CERT_PATH" 2>/dev/null && [ -s "$CERT_PATH" ]; then
+    echo "  [✓] Certificado descargado desde secret con etiqueta"
+    DOWNLOAD_SUCCESS=true
   fi
   
-  # Intento 2: Descargar desde sealed-secrets-key (fallback)
+  # Intento 3: Descargar desde sealed-secrets-key (fallback adicional)
   if [ "$DOWNLOAD_SUCCESS" = "false" ] && timeout 10 kubectl get secret \
     -n kube-system sealed-secrets-key \
     -o jsonpath='{.data.tls\.crt}' 2>/dev/null | \
-    base64 -d > "$CERT_PATH" 2>/dev/null; then
-    
-    if [ -s "$CERT_PATH" ]; then
-      echo "  [✓] Certificado descargado desde sealed-secrets-key"
-      DOWNLOAD_SUCCESS=true
-    fi
+    base64 -d > "$CERT_PATH" 2>/dev/null && [ -s "$CERT_PATH" ]; then
+    echo "  [✓] Certificado descargado desde sealed-secrets-key"
+    DOWNLOAD_SUCCESS=true
   fi
   
   # Si descarga falló, intentar usar certificado local existente
@@ -56,11 +67,42 @@ if [ "$FETCH_CERT" = "true" ]; then
     echo "  [!] No se pudo descargar del cluster (sealed-secrets podría no estar instalado)"
     
     if [ -f "$CERT_PATH" ]; then
-      echo "  [✓] Usando certificado local existente"
-      echo "      Para actualizar con el del cluster, ejecuta nuevamente después de bootstrap-cluster.yml"
-      DOWNLOAD_SUCCESS=true
+      # Validar que el certificado local es válido
+      if openssl x509 -in "$CERT_PATH" -noout &>/dev/null; then
+        echo "  [✓] Usando certificado local existente (válido)"
+        echo "      Para actualizar con el del cluster, ejecuta nuevamente después de bootstrap-cluster.yml"
+        DOWNLOAD_SUCCESS=true
+      else
+        echo "  [⚠] Certificado local existe pero NO ES VÁLIDO"
+        echo "      Regenerando certificado auto-firmado nuevo..."
+        rm -f "$CERT_PATH"
+        
+        # Generar certificado auto-firmado temporal
+        openssl req -x509 -newkey rsa:2048 -nodes \
+          -keyout /tmp/temp-key.pem \
+          -out "$CERT_PATH" \
+          -days 365 \
+          -subj "/CN=sealed-secrets-temp" 2>/dev/null || {
+          echo "  [✗] ERROR: No se pudo generar certificado auto-firmado"
+          exit 1
+        }
+        
+        # Verificar que el certificado se generó correctamente
+        if [ ! -f "$CERT_PATH" ] || [ ! -s "$CERT_PATH" ]; then
+          echo "  [✗] ERROR: Certificado generado pero no existe o está vacío"
+          exit 1
+        fi
+        
+        if ! openssl x509 -in "$CERT_PATH" -noout &>/dev/null; then
+          echo "  [✗] ERROR: Certificado generado pero no es válido"
+          exit 1
+        fi
+        
+        echo "  [✓] Certificado nuevo generado y validado"
+        DOWNLOAD_SUCCESS=true
+      fi
     else
-      echo "  [!] Certificado local tampoco encontrado en $CERT_PATH"
+      echo "  [!] Certificado local no encontrado en $CERT_PATH"
       echo "      Generando certificado auto-firmado temporal..."
       
       # Generar certificado auto-firmado temporal
@@ -73,7 +115,18 @@ if [ "$FETCH_CERT" = "true" ]; then
         exit 1
       }
       
-      echo "  [✓] Certificado temporal generado"
+      # Verificar que el certificado se generó correctamente
+      if [ ! -f "$CERT_PATH" ] || [ ! -s "$CERT_PATH" ]; then
+        echo "  [✗] ERROR: Certificado generado pero no existe o está vacío"
+        exit 1
+      fi
+      
+      if ! openssl x509 -in "$CERT_PATH" -noout &>/dev/null; then
+        echo "  [✗] ERROR: Certificado generado pero no es válido"
+        exit 1
+      fi
+      
+      echo "  [✓] Certificado temporal generado y validado"
       echo "      ⚠️  ADVERTENCIA: Usando certificado auto-firmado temporal"
       echo "      Después de instalar sealed-secrets via bootstrap-cluster.yml:"
       echo "      $ FETCH_CERT=true $0"
@@ -90,25 +143,38 @@ if [ "$FETCH_CERT" = "true" ]; then
     exit 1
   fi
 else
-  # Opción 2: Verificar que la clave pública existe en ruta local
+  # Opción 2: Verificar que la clave pública existe en ruta local o descargar del cluster
   if [ ! -f "$CERT_PATH" ]; then
     echo "[!] Certificado público no encontrado en $CERT_PATH"
     echo "    Intentando descargar del cluster..."
     
-    # Intento 1: Descargar usando etiqueta
-    if timeout 10 kubectl get secret \
+    DOWNLOAD_SUCCESS=false
+    
+    # Intento 1: Usar kubeseal --fetch-cert (método oficial)
+    if timeout 10 kubeseal --fetch-cert \
+      --controller-name=sealed-secrets \
+      --controller-namespace=kube-system \
+      > "$CERT_PATH" 2>/dev/null && [ -s "$CERT_PATH" ]; then
+      echo "[✓] Certificado descargado con kubeseal"
+      DOWNLOAD_SUCCESS=true
+    # Intento 2: Descargar usando etiqueta
+    elif timeout 10 kubectl get secret \
       -n kube-system \
       -l sealedsecrets.bitnami.com/status=active \
       -o jsonpath='{.items[0].data.tls\.crt}' 2>/dev/null | \
       base64 -d > "$CERT_PATH" 2>/dev/null && [ -s "$CERT_PATH" ]; then
-      echo "✓ Certificado descargado del cluster"
-    # Intento 2: Descargar desde sealed-secrets-key
+      echo "[✓] Certificado descargado del cluster"
+      DOWNLOAD_SUCCESS=true
+    # Intento 3: Descargar desde sealed-secrets-key
     elif timeout 10 kubectl get secret \
       -n kube-system sealed-secrets-key \
       -o jsonpath='{.data.tls\.crt}' 2>/dev/null | \
       base64 -d > "$CERT_PATH" 2>/dev/null && [ -s "$CERT_PATH" ]; then
-      echo "✓ Certificado descargado del cluster"
-    else
+      echo "[✓] Certificado descargado del cluster"
+      DOWNLOAD_SUCCESS=true
+    fi
+    
+    if [ "$DOWNLOAD_SUCCESS" = "false" ]; then
       echo "[✗] ERROR: Certificado no encontrado en:"
       echo "    • Ruta local: $CERT_PATH"
       echo "    • Cluster: sealed-secrets en kube-system"
@@ -119,7 +185,87 @@ else
       exit 1
     fi
   else
-    echo "✓ Certificado público: $CERT_PATH"
+    # Certificado local existe, validarlo
+    echo "[i] Certificado local encontrado: $CERT_PATH"
+    
+    # Verificar que el archivo tiene contenido
+    if [ ! -s "$CERT_PATH" ]; then
+      echo "[✗] ERROR: Certificado local existe pero está VACÍO"
+      echo "    Intentando descargar del cluster..."
+      
+      DOWNLOAD_SUCCESS=false
+      
+      # Intento 1: Usar kubeseal --fetch-cert
+      if timeout 10 kubeseal --fetch-cert \
+        --controller-name=sealed-secrets \
+        --controller-namespace=kube-system \
+        > "$CERT_PATH" 2>/dev/null && [ -s "$CERT_PATH" ]; then
+        echo "[✓] Certificado descargado y reemplazó al vacío"
+        DOWNLOAD_SUCCESS=true
+      # Intento 2: Descargar usando etiqueta
+      elif timeout 10 kubectl get secret \
+        -n kube-system \
+        -l sealedsecrets.bitnami.com/status=active \
+        -o jsonpath='{.items[0].data.tls\.crt}' 2>/dev/null | \
+        base64 -d > "$CERT_PATH" 2>/dev/null && [ -s "$CERT_PATH" ]; then
+        echo "[✓] Certificado descargado y reemplazó al vacío"
+        DOWNLOAD_SUCCESS=true
+      # Intento 3: Descargar desde sealed-secrets-key
+      elif timeout 10 kubectl get secret \
+        -n kube-system sealed-secrets-key \
+        -o jsonpath='{.data.tls\.crt}' 2>/dev/null | \
+        base64 -d > "$CERT_PATH" 2>/dev/null && [ -s "$CERT_PATH" ]; then
+        echo "[✓] Certificado descargado y reemplazó al vacío"
+        DOWNLOAD_SUCCESS=true
+      fi
+      
+      if [ "$DOWNLOAD_SUCCESS" = "false" ]; then
+        echo "[✗] ERROR: No se pudo descargar certificado válido del cluster"
+        echo "    Opciones:"
+        echo "    1. Usar: FETCH_CERT=true $0"
+        echo "    2. O instalar sealed-secrets: bootstrap-cluster.yml"
+        exit 1
+      fi
+    elif ! openssl x509 -in "$CERT_PATH" -noout &>/dev/null; then
+      echo "[✗] ERROR: Certificado local existe pero NO ES VÁLIDO"
+      echo "    Intentando descargar del cluster..."
+      
+      DOWNLOAD_SUCCESS=false
+      
+      # Intento 1: Usar kubeseal --fetch-cert
+      if timeout 10 kubeseal --fetch-cert \
+        --controller-name=sealed-secrets \
+        --controller-namespace=kube-system \
+        > "$CERT_PATH" 2>/dev/null && [ -s "$CERT_PATH" ]; then
+        echo "[✓] Certificado descargado y reemplazó al inválido"
+        DOWNLOAD_SUCCESS=true
+      # Intento 2: Descargar usando etiqueta
+      elif timeout 10 kubectl get secret \
+        -n kube-system \
+        -l sealedsecrets.bitnami.com/status=active \
+        -o jsonpath='{.items[0].data.tls\.crt}' 2>/dev/null | \
+        base64 -d > "$CERT_PATH" 2>/dev/null && [ -s "$CERT_PATH" ]; then
+        echo "[✓] Certificado descargado y reemplazó al inválido"
+        DOWNLOAD_SUCCESS=true
+      # Intento 3: Descargar desde sealed-secrets-key
+      elif timeout 10 kubectl get secret \
+        -n kube-system sealed-secrets-key \
+        -o jsonpath='{.data.tls\.crt}' 2>/dev/null | \
+        base64 -d > "$CERT_PATH" 2>/dev/null && [ -s "$CERT_PATH" ]; then
+        echo "[✓] Certificado descargado y reemplazó al inválido"
+        DOWNLOAD_SUCCESS=true
+      fi
+      
+      if [ "$DOWNLOAD_SUCCESS" = "false" ]; then
+        echo "[✗] ERROR: No se pudo descargar certificado válido del cluster"
+        echo "    Opciones:"
+        echo "    1. Usar: FETCH_CERT=true $0"
+        echo "    2. O instalar sealed-secrets: bootstrap-cluster.yml"
+        exit 1
+      fi
+    else
+      echo "[✓] Certificado local válido"
+    fi
   fi
 fi
 echo "::endgroup::"
@@ -276,17 +422,29 @@ echo "::group::Sellando Secret con kubeseal (usando clave pública)"
 # Verificar que el certificado existe y es válido
 if [ ! -f "$CERT_PATH" ]; then
   echo "[✗] ERROR: Certificado no encontrado en $CERT_PATH"
+  echo "    Comprueba que el archivo .pem existe en la ruta especificada"
   exit 1
 fi
 
-# Verificar que el certificado es válido
+# Verificar que el archivo tiene contenido
+if [ ! -s "$CERT_PATH" ]; then
+  echo "[✗] ERROR: Certificado vacío en $CERT_PATH"
+  echo "    El archivo existe pero no tiene contenido"
+  exit 1
+fi
+
+# Verificar que el certificado es válido X509
 if ! openssl x509 -in "$CERT_PATH" -noout &>/dev/null; then
   echo "[✗] ERROR: Certificado inválido en $CERT_PATH"
-  echo "  Verifica que es un certificado X509 válido"
+  echo "    El archivo existe pero no es un certificado X509 válido"
+  echo ""
+  echo "    Intenta:"
+  echo "    1. Verificar con: openssl x509 -in \"$CERT_PATH\" -text -noout"
+  echo "    2. O descargar nuevo: FETCH_CERT=true $0"
   exit 1
 fi
 
-echo "[i] Certificado validado"
+echo "[i] Certificado validado correctamente"
 echo ""
 
 # Ejecutar kubeseal
