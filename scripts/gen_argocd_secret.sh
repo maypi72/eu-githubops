@@ -516,10 +516,14 @@ fi
 # Agregar el secreto sellado
 git add "${OUT_DIR}/${SECRET_NAME}.yaml"
 
-# Si se descargó certificado del cluster, también agregarlo
-if [ "$FETCH_CERT" = "true" ] && [ -f "$CERT_PATH" ]; then
-  echo "[i] Certificado descargado - incluyendo en commit"
+# IMPORTANTE: Siempre agregar el certificado si existe
+# (ya sea descargado del cluster o generado temporalmente)
+if [ -f "$CERT_PATH" ]; then
+  echo "[i] Certificado detectado - incluyendo en commit"
   git add "$CERT_PATH"
+  CERT_INCLUDED="true"
+else
+  CERT_INCLUDED="false"
 fi
 
 # Crear commit si hay cambios
@@ -527,8 +531,10 @@ if git diff --cached --quiet; then
   echo "[!] Sin cambios para hacer commit"
 else
   # Determinar mensaje del commit
-  if [ "$FETCH_CERT" = "true" ]; then
+  if [ "$CERT_INCLUDED" = "true" ] && [ "$FETCH_CERT" = "true" ]; then
     COMMIT_MSG="chore: update ArgoCD sealed secret and cluster certificate"
+  elif [ "$CERT_INCLUDED" = "true" ]; then
+    COMMIT_MSG="chore: update ArgoCD sealed secret with temporary certificate"
   else
     COMMIT_MSG="chore: update ArgoCD sealed secret"
   fi
@@ -551,17 +557,21 @@ echo "[✓] Secreto sellado generado correctamente"
 echo ""
 echo "Archivos actualizados:"
 echo "  📄 infra/argocd/sealed-secrets/argocd-secret.yaml"
-
-if [ "$FETCH_CERT" = "true" ]; then
-  echo "  📄 $CERT_PATH (descargado del cluster)"
+if [ "$CERT_INCLUDED" = "true" ]; then
+  if [ "$FETCH_CERT" = "true" ]; then
+    echo "  📄 $CERT_PATH (✓ Descargado del cluster)"
+  else
+    echo "  📄 $CERT_PATH (⚠️  Temporal - regenerar con FETCH_CERT=true)"
+  fi
 fi
-
 echo ""
 echo "🚀 Próximos pasos:"
-if [ "$FETCH_CERT" = "true" ]; then
-  echo "  • Certificado descargado y subido al repo ✓"
+if [ "$FETCH_CERT" != "true" ] && [ "$CERT_INCLUDED" = "true" ]; then
+  echo "  • ⚠️  Se usó certificado temporal (no es del cluster real)"
+  echo "  • Después de instalar sealed-secrets en el cluster:"
+  echo "    $ FETCH_CERT=true $0"
+  echo "  • Esto reemplazará el certificado con el del cluster real"
 fi
 echo "  • Secreto listo para ser aplicado al cluster"
 echo "  • En CI: bootstrap-argocd.yaml hará push automáticamente"
-echo "════════════════════════════════════════════════"
 echo "════════════════════════════════════════════════"
