@@ -10,8 +10,8 @@ spec:
   sources:
     # 1. El repositorio de Helm oficial (Chart original)
     - repoURL: https://prometheus-community.github.io/helm-charts
-      chart: kube-prometheus-stack
-      targetRevision: 84.2.0 # Ajusta a la versión deseada
+      chart: prometheus-operator-crds
+      targetRevision: 28.0.1 # Ajusta a la versión deseada
       helm:
         valueFiles:
           # Referencia al repo de Git mediante el alias definido abajo ($values-repo)
