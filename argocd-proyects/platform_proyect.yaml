@@ -12,6 +12,9 @@ spec:
     - https://aquasecurity.github.io/helm-charts
     - https://charts.bitnami.com/bitnami
     - https://github.com/aquasecurity/helm-charts
+    - https://prometheus-community.github.io/helm-charts
+    - https://grafana.github.io/helm-charts
+    - https://github.com/prometheus-community/helm-charts
   destinations:
     - namespace: "*"
       server: https://kubernetes.default.svc
