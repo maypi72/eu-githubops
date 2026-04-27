@@ -268,6 +268,63 @@ jobs:
           
           echo "::endgroup::"
 
+      - name: Fetch Sealed-Secrets Certificate
+        if: inputs.fetch_cert == true
+        run: |
+          echo "::group::Descargando certificado de sealed-secrets"
+          
+          export KUBECONFIG
+          
+          # Crear directorio si no existe
+          mkdir -p infra/sealed-secrets
+          
+          # Intentar descargar el certificado
+          DOWNLOAD_SUCCESS=false
+          
+          # Intento 1: Usar kubeseal --fetch-cert
+          if timeout 10 kubeseal --fetch-cert \
+            --controller-name=sealed-secrets \
+            --controller-namespace=kube-system \
+            > infra/sealed-secrets/pub-cert.pem 2>/dev/null && [ -s infra/sealed-secrets/pub-cert.pem ]; then
+            echo "[✓] Certificado descargado con kubeseal --fetch-cert"
+            DOWNLOAD_SUCCESS=true
+          fi
+          
+          # Intento 2: Descargar usando kubectl
+          if [ "$DOWNLOAD_SUCCESS" = "false" ] && timeout 10 kubectl get secret \
+            -n kube-system sealed-secrets-key \
+            -o jsonpath='{.data.tls\.crt}' 2>/dev/null | \
+            base64 -d > infra/sealed-secrets/pub-cert.pem 2>/dev/null && [ -s infra/sealed-secrets/pub-cert.pem ]; then
+            echo "[✓] Certificado descargado desde sealed-secrets-key"
+            DOWNLOAD_SUCCESS=true
+          fi
+          
+          if [ "$DOWNLOAD_SUCCESS" = "true" ]; then
+            echo "[✓] Certificado guardado en: infra/sealed-secrets/pub-cert.pem"
+            # Verificar que es válido
+            if openssl x509 -in infra/sealed-secrets/pub-cert.pem -noout &>/dev/null; then
+              echo "[✓] Certificado validado correctamente"
+            else
+              echo "[✗] ERROR: Certificado descargado pero NO ES VÁLIDO"
+              exit 1
+            fi
+          else
+            echo "[✗] ERROR: No se pudo descargar certificado de sealed-secrets"
+            echo ""
+            echo "Diagnosticando:"
+            echo "  • sealed-secrets instalado:"
+            kubectl get deployment -n kube-system sealed-secrets-controller 2>/dev/null || echo "    [✗] No encontrado"
+            echo ""
+            echo "  • Pods de sealed-secrets:"
+            kubectl get pods -n kube-system -l app.kubernetes.io/name=sealed-secrets 2>/dev/null || echo "    [✗] No encontrados"
+            echo ""
+            echo "  • kubeseal disponible:"
+            which kubeseal || echo "    [✗] No encontrado"
+            exit 1
+          fi
+          
+          echo "::endgroup::"
+
       - name: Generate ArgoCD Sealed Secret
         id: generate-secret
         env:

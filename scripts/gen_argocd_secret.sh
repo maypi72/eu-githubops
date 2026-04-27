@@ -62,86 +62,24 @@ if [ "$FETCH_CERT" = "true" ]; then
     DOWNLOAD_SUCCESS=true
   fi
   
-  # Si descarga falló, intentar usar certificado local existente
+  # Si descarga falló, FALLAR (no usar certificado temporal cuando se fuerza descarga)
   if [ "$DOWNLOAD_SUCCESS" = "false" ]; then
-    echo "  [!] No se pudo descargar del cluster (sealed-secrets podría no estar instalado)"
-    
-    if [ -f "$CERT_PATH" ]; then
-      # Validar que el certificado local es válido
-      if openssl x509 -in "$CERT_PATH" -noout &>/dev/null; then
-        echo "  [✓] Usando certificado local existente (válido)"
-        echo "      Para actualizar con el del cluster, ejecuta nuevamente después de bootstrap-cluster.yml"
-        DOWNLOAD_SUCCESS=true
-      else
-        echo "  [⚠] Certificado local existe pero NO ES VÁLIDO"
-        echo "      Regenerando certificado auto-firmado nuevo..."
-        rm -f "$CERT_PATH"
-        
-        # Generar certificado auto-firmado temporal
-        openssl req -x509 -newkey rsa:2048 -nodes \
-          -keyout /tmp/temp-key.pem \
-          -out "$CERT_PATH" \
-          -days 365 \
-          -subj "/CN=sealed-secrets-temp" 2>/dev/null || {
-          echo "  [✗] ERROR: No se pudo generar certificado auto-firmado"
-          exit 1
-        }
-        
-        # Verificar que el certificado se generó correctamente
-        if [ ! -f "$CERT_PATH" ] || [ ! -s "$CERT_PATH" ]; then
-          echo "  [✗] ERROR: Certificado generado pero no existe o está vacío"
-          exit 1
-        fi
-        
-        if ! openssl x509 -in "$CERT_PATH" -noout &>/dev/null; then
-          echo "  [✗] ERROR: Certificado generado pero no es válido"
-          exit 1
-        fi
-        
-        echo "  [✓] Certificado nuevo generado y validado"
-        DOWNLOAD_SUCCESS=true
-      fi
-    else
-      echo "  [!] Certificado local no encontrado en $CERT_PATH"
-      echo "      Generando certificado auto-firmado temporal..."
-      
-      # Generar certificado auto-firmado temporal
-      openssl req -x509 -newkey rsa:2048 -nodes \
-        -keyout /tmp/temp-key.pem \
-        -out "$CERT_PATH" \
-        -days 365 \
-        -subj "/CN=sealed-secrets-temp" 2>/dev/null || {
-        echo "  [✗] ERROR: No se pudo generar certificado auto-firmado"
-        exit 1
-      }
-      
-      # Verificar que el certificado se generó correctamente
-      if [ ! -f "$CERT_PATH" ] || [ ! -s "$CERT_PATH" ]; then
-        echo "  [✗] ERROR: Certificado generado pero no existe o está vacío"
-        exit 1
-      fi
-      
-      if ! openssl x509 -in "$CERT_PATH" -noout &>/dev/null; then
-        echo "  [✗] ERROR: Certificado generado pero no es válido"
-        exit 1
-      fi
-      
-      echo "  [✓] Certificado temporal generado y validado"
-      echo "      ⚠️  ADVERTENCIA: Usando certificado auto-firmado temporal"
-      echo "      Después de instalar sealed-secrets via bootstrap-cluster.yml:"
-      echo "      $ FETCH_CERT=true $0"
-      echo "      para reemplazarlo con el certificado del cluster real"
-      
-      DOWNLOAD_SUCCESS=true
-    fi
-  fi
-  
-  if [ "$DOWNLOAD_SUCCESS" = "true" ]; then
-    echo "✓ Certificado disponible: $CERT_PATH"
-  else
-    echo "[✗] ERROR: No se pudo obtener certificado"
+    echo "  [✗] ERROR: No se pudo descargar certificado del cluster con FETCH_CERT=true"
+    echo ""
+    echo "  Causas posibles:"
+    echo "    1. sealed-secrets no está instalado en el cluster"
+    echo "    2. No hay conectividad con el cluster"
+    echo "    3. Permisos insuficientes para acceder a sealed-secrets"
+    echo "    4. kubeseal no está disponible en el runner"
+    echo ""
+    echo "  Soluciones:"
+    echo "    1. Verificar: kubectl get pods -n kube-system -l app.kubernetes.io/name=sealed-secrets"
+    echo "    2. Verificar kubeconfig: kubectl cluster-info"
+    echo "    3. Verificar kubeseal: which kubeseal"
     exit 1
   fi
+  
+  echo "✓ Certificado descargado exitosamente: $CERT_PATH"
 else
   # Opción 2: Verificar que la clave pública existe en ruta local o descargar del cluster
   if [ ! -f "$CERT_PATH" ]; then
