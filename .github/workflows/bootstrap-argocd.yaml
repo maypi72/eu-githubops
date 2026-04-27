@@ -357,6 +357,76 @@ jobs:
           chmod +x scripts/gen_argocd_secret.sh
           echo "[✓] Permisos ejecutables otorgados"
           
+          # Verificar e instalar kubeseal si es necesario
+          echo ""
+          echo "Verificando kubeseal..."
+          if ! command -v kubeseal &>/dev/null; then
+            echo "[!] kubeseal no está instalado en el runner"
+            echo "    Descargando e instalando kubeseal v0.24.0..."
+            
+            KUBESEAL_TMP=$(mktemp -d)
+            trap "rm -rf $KUBESEAL_TMP" EXIT
+            
+            if ! wget -qO - https://github.com/bitnami-labs/sealed-secrets/releases/download/v0.24.0/kubeseal-0.24.0-linux-amd64.tar.gz | \
+                 tar xfz - -C "$KUBESEAL_TMP"; then
+              echo "[✗] ERROR: No se pudo descargar kubeseal"
+              exit 1
+            fi
+            
+            if ! sudo mv "$KUBESEAL_TMP/kubeseal" /usr/local/bin/ || \
+               ! sudo chmod +x /usr/local/bin/kubeseal; then
+              echo "[✗] ERROR: No se pudo instalar kubeseal en /usr/local/bin"
+              exit 1
+            fi
+            
+            echo "[✓] kubeseal instalado exitosamente"
+          else
+            KUBESEAL_VERSION=$(kubeseal --version 2>&1 | grep -oP 'v\d+\.\d+\.\d+')
+            echo "[✓] kubeseal disponible: $KUBESEAL_VERSION"
+          fi
+          
+          # Verificar e instalar herramientas de CLI si es necesario
+          echo ""
+          echo "Verificando herramientas adicionales..."
+          TOOLS_TO_INSTALL=()
+          
+          if ! command -v htpasswd &>/dev/null; then
+            TOOLS_TO_INSTALL+=("apache2-utils")
+          else
+            echo "[✓] htpasswd disponible"
+          fi
+          
+          if ! command -v yq &>/dev/null; then
+            echo "[!] yq no disponible - Se instalará"
+          else
+            echo "[✓] yq disponible"
+          fi
+          
+          if ! command -v jq &>/dev/null; then
+            TOOLS_TO_INSTALL+=("jq")
+          else
+            echo "[✓] jq disponible"
+          fi
+          
+          # Instalar paquetes si es necesario
+          if [ ${#TOOLS_TO_INSTALL[@]} -gt 0 ]; then
+            echo ""
+            echo "[!] Instalando paquetes: ${TOOLS_TO_INSTALL[*]}"
+            sudo apt-get update -qq && sudo apt-get install -y "${TOOLS_TO_INSTALL[@]}"
+            echo "[✓] Paquetes instalados"
+          fi
+          
+          # Instalar yq si no existe (descargable como binario)
+          if ! command -v yq &>/dev/null; then
+            echo "[!] Instalando yq desde GitHub releases..."
+            if ! sudo curl -fsSL https://github.com/mikefarah/yq/releases/latest/download/yq_linux_amd64 -o /usr/local/bin/yq || \
+               ! sudo chmod +x /usr/local/bin/yq; then
+              echo "[✗] ERROR: No se pudo instalar yq"
+              exit 1
+            fi
+            echo "[✓] yq instalado exitosamente"
+          fi
+          
           # Ejecutar el script
           echo ""
           echo "Ejecutando generación de secreto..."
