@@ -14,27 +14,27 @@ on:
         default: 'v1.34.4+k3s1'
         type: string
       install_k3s:
-        description: 'Instalar K3s (requerido para otros componentes) [ignorado si install_all=true]'
+        description: '⚙️ Instalar K3s (requerido para otros componentes) - IGNORADO si install_all=true'
         required: false
         default: true
         type: boolean
       install_helm:
-        description: 'Instalar Helm (requiere k3s) [ignorado si install_all=true]'
+        description: '⚙️ Instalar Helm (requiere k3s) - IGNORADO si install_all=true'
         required: false
         default: false
         type: boolean
       install_ingress:
-        description: 'Instalar Ingress (requiere k3s) [ignorado si install_all=true]'
+        description: '⚙️ Instalar Ingress (requiere k3s) - IGNORADO si install_all=true'
         required: false
         default: false
         type: boolean
       install_cert_manager:
-        description: 'Instalar Cert-Manager (requiere k3s) [ignorado si install_all=true]'
+        description: '⚙️ Instalar Cert-Manager (requiere k3s) - IGNORADO si install_all=true'
         required: false
         default: false
         type: boolean
       install_sealed_secrets:
-        description: 'Instalar Sealed-Secrets (requiere k3s) [ignorado si install_all=true]'
+        description: '⚙️ Instalar Sealed-Secrets (requiere k3s) - IGNORADO si install_all=true'
         required: false
         default: false
         type: boolean
@@ -76,8 +76,16 @@ jobs:
           INSTALL_ALL="${{ inputs.install_all }}"
           
           if [ "$INSTALL_ALL" == "true" ]; then
-            echo "⚡ MODO INSTALACIÓN COMPLETA ACTIVADO"
-            echo "Ignorando selecciones individuales - instalando TODOS los componentes"
+            echo "⚡⚡⚡ MODO INSTALACIÓN COMPLETA ACTIVADO ⚡⚡⚡"
+            echo ""
+            echo "Se instalarán TODOS los componentes:"
+            echo "  1. K3s"
+            echo "  2. Helm"
+            echo "  3. Ingress"
+            echo "  4. Cert-Manager"
+            echo "  5. Sealed-Secrets"
+            echo ""
+            echo "Las selecciones individuales están siendo IGNORADAS"
             echo ""
             echo "install_k3s=true" >> $GITHUB_OUTPUT
             echo "install_helm=true" >> $GITHUB_OUTPUT
@@ -85,7 +93,15 @@ jobs:
             echo "install_cert_manager=true" >> $GITHUB_OUTPUT
             echo "install_sealed_secrets=true" >> $GITHUB_OUTPUT
           else
-            echo "Usando selecciones individuales"
+            echo "Modo selección individual activado"
+            echo ""
+            echo "Componentes seleccionados:"
+            [ "${{ inputs.install_k3s }}" == "true" ] && echo "  ✓ K3s" || echo "  ✗ K3s"
+            [ "${{ inputs.install_helm }}" == "true" ] && echo "  ✓ Helm" || echo "  ✗ Helm"
+            [ "${{ inputs.install_ingress }}" == "true" ] && echo "  ✓ Ingress" || echo "  ✗ Ingress"
+            [ "${{ inputs.install_cert_manager }}" == "true" ] && echo "  ✓ Cert-Manager" || echo "  ✗ Cert-Manager"
+            [ "${{ inputs.install_sealed_secrets }}" == "true" ] && echo "  ✓ Sealed-Secrets" || echo "  ✗ Sealed-Secrets"
+            echo ""
             echo "install_k3s=${{ inputs.install_k3s }}" >> $GITHUB_OUTPUT
             echo "install_helm=${{ inputs.install_helm }}" >> $GITHUB_OUTPUT
             echo "install_ingress=${{ inputs.install_ingress }}" >> $GITHUB_OUTPUT
@@ -135,8 +151,8 @@ jobs:
           
           # Validar dependencias
           echo "Validando dependencias..."
-          K3S_INSTALLED="{{ steps.detect-existing.outputs.k3s_installed }}"
-          K3S_SELECTED="{{ steps.normalize-inputs.outputs.install_k3s }}"
+          
+          # Determinar si otros componentes están seleccionados
           OTHER_COMPONENTS_SELECTED=false
           
           if [ "${{ steps.normalize-inputs.outputs.install_helm }}" == "true" ] || [ "${{ steps.normalize-inputs.outputs.install_ingress }}" == "true" ] || [ "${{ steps.normalize-inputs.outputs.install_cert_manager }}" == "true" ] || [ "${{ steps.normalize-inputs.outputs.install_sealed_secrets }}" == "true" ]; then
@@ -145,7 +161,8 @@ jobs:
           
           # Si se seleccionan otros componentes, verificar que K3s esté disponible
           if [ "$OTHER_COMPONENTS_SELECTED" = "true" ]; then
-            if [ "$K3S_INSTALLED" != "true" ] && [ "$K3S_SELECTED" != "true" ]; then
+            # Verificar que K3s esté disponible (instalado o seleccionado para instalar)
+            if [ "${{ steps.detect-existing.outputs.k3s_installed }}" != "true" ] && [ "${{ steps.normalize-inputs.outputs.install_k3s }}" != "true" ]; then
               echo "✗ ERROR: Helm, Ingress, Cert-Manager y Sealed-Secrets requieren que K3s esté instalado o seleccionado"
               echo ""
               echo "Opciones:"
@@ -154,13 +171,13 @@ jobs:
               exit 1
             fi
             
-            if [ "$K3S_INSTALLED" = "true" ]; then
+            if [ "${{ steps.detect-existing.outputs.k3s_installed }}" = "true" ]; then
               echo "✓ K3s detectado en el sistema (será usado como base)"
             else
               echo "✓ K3s será instalado antes de los otros componentes"
             fi
           else
-            if [ "$K3S_INSTALLED" = "true" ]; then
+            if [ "${{ steps.detect-existing.outputs.k3s_installed }}" = "true" ]; then
               echo "✓ K3s ya está instalado"
             fi
           fi
