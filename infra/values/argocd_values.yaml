@@ -28,6 +28,9 @@ controller:
   env:
     - name: ARGOCD_REPO_SERVER_PLAINTEXT
       value: "true"
+    - name: ENABLE_MULTI_SOURCE_REPO
+      value: "true" 
+
   extraArgs:
     - --repo-server-plaintext
 
