@@ -42,8 +42,7 @@ scanners:
   clusterComplianceReport:
     enabled: false
 
-excludeNamespaces: "kube-system,trivy-system,kube-public,kube-node-lease"
-
+excludeNamespaces: "kube-system,trivy-system,kube-public,kube-node-lease,monitoring"
 nodeCollector:
   enabled: false
 
