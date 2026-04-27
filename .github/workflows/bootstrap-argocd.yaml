@@ -40,7 +40,7 @@ on:
       fetch_cert:
         description: '📥 Descargar certificado del cluster Y actualizar .pem en repo (crear/sobrescribir)'
         required: false
-        default: false
+        default: true
         type: boolean
       apply_sealed_secret:
         description: '⚙️ Aplicar secreto al cluster (solo si cambió la contraseña) [¡desmarcar para upgrades sin cambios!]'
