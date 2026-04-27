@@ -382,6 +382,87 @@ kubectl apply -f sealed-secret.yaml
 kubeseal --fetch-cert > public-key.crt
 ```
 
+#### ⚠️ Certificado Público Requerido
+
+**IMPORTANTE:** Para que ArgoCD y otros componentes funcionen correctamente con SealedSecrets, **debe existir** el certificado público del cluster en:
+
+```
+infra/sealed-secrets/pub-cert.pem
+```
+
+Este archivo contiene la clave pública de Sealed-Secrets y es **necesario para**:
+- ✅ Sellar nuevos secrets en CI/CD (GitHub Actions)
+- ✅ Generar el SealedSecret de ArgoCD (`infra/argocd/sealed-secrets/argocd-secret.yaml`)
+- ✅ Que Sealed-Secrets pueda desencriptar los secretos en el cluster
+
+##### Cómo crear el certificado
+
+**Opción 1: Descargarlo del cluster (RECOMENDADO)**
+
+```bash
+# Desde tu máquina local con acceso al cluster:
+export KUBECONFIG=/etc/rancher/k3s/k3s.yaml  # o tu kubeconfig
+
+# Descargar certificado
+kubeseal --fetch-cert \
+  --controller-name=sealed-secrets \
+  --controller-namespace=kube-system \
+  > infra/sealed-secrets/pub-cert.pem
+
+# Verifyar que es válido
+openssl x509 -in infra/sealed-secrets/pub-cert.pem -text -noout | head -10
+
+# Hacer commit
+git add infra/sealed-secrets/pub-cert.pem
+git commit -m "chore: add sealed-secrets public certificate"
+git push
+```
+
+**Opción 2: Generar automáticamente (desde el workflow)**
+
+El workflow `bootstrap-argocd.yaml` intenta descargar automáticamente el certificado cuando:
+- Se ejecuta con `fetch_cert = true` (es el valor por defecto)
+- Sealed-Secrets está instalado en el cluster
+
+```yaml
+# En el workflow, se ejecutará automáticamente:
+- name: Fetch Sealed-Secrets Certificate
+  # Descargará: infra/sealed-secrets/pub-cert.pem
+```
+
+##### Verificar que el certificado es correcto
+
+```bash
+# 1. Verificar que existe
+ls -lah infra/sealed-secrets/pub-cert.pem
+
+# 2. Verificar que es un certificado X509 válido
+openssl x509 -in infra/sealed-secrets/pub-cert.pem -noout
+
+# 3. Ver información del certificado
+openssl x509 -in infra/sealed-secrets/pub-cert.pem -text -noout | grep -A 2 "Subject:"
+
+# 4. Verificar que coincide con el del cluster
+kubectl get secret -n kube-system sealed-secrets-key -o jsonpath='{.data.tls\.crt}' | \
+  base64 -d > /tmp/cluster-cert.pem && \
+  diff infra/sealed-secrets/pub-cert.pem /tmp/cluster-cert.pem && \
+  echo "✓ Certificados coinciden"
+```
+
+##### ¿Qué pasa si el certificado no existe o es inválido?
+
+- ❌ El workflow `bootstrap-argocd.yaml` fallará al sellar el secreto
+- ❌ ArgoCD no podrá desencriptar su contraseña de administrador
+- ❌ El SealedSecret nunca se convertirá a un Secret normal
+
+**Solución:** Ejecutar:
+```bash
+kubeseal --fetch-cert > infra/sealed-secrets/pub-cert.pem
+git add infra/sealed-secrets/pub-cert.pem
+git commit -m "chore: update sealed-secrets certificate"
+git push
+```
+
 ### ArgoCD
 
 ArgoCD es un GitOps controller que sincroniza aplicaciones definidas en Git con el cluster Kubernetes.
