@@ -7,17 +7,26 @@ metadata:
     argocd.argoproj.io/sync-wave: "0"
 spec:
   project: platform-project
-  source:
-    repoURL: https://github.com/maypi72/eu-githubops.git
-    targetRevision: main
-    path: platform/apps/monitoring/crds
-    helm:
-      releaseName: monitoring-crds
-      valueFiles:
-        - values.yaml
+  sources:
+    # 1. El repositorio de Helm oficial (Chart original)
+    - repoURL: https://prometheus-community.github.io/helm-charts
+      chart: kube-prometheus-stack
+      targetRevision: 84.2.0 # Ajusta a la versión deseada
+      helm:
+        valueFiles:
+          # Referencia al repo de Git mediante el alias definido abajo ($values-repo)
+          - $values-repo/platform/apps/monitoring/crds/values.yaml
+
+    # 2. Tu repositorio de Git (Fuente de los valores)
+    - repoURL: https://github.com/maypi72/eu-githubops.git
+      targetRevision: main
+      ref: values-repo # Este es el alias que se usa arriba
+  
   destination:
+    # Este es el servidor interno del clúster
     server: https://kubernetes.default.svc
     namespace: monitoring
+
   syncPolicy:
     automated:
       prune: true

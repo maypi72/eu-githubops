@@ -7,14 +7,22 @@ metadata:
     argocd.argoproj.io/sync-wave: "1"
 spec:
   project: platform-project
-  source:
-    repoURL: https://github.com/maypi72/eu-githubops.git
-    targetRevision: main
-    path: platform/apps/monitoring/prometheus
-    helm:
-      releaseName: prometheus
-      valueFiles:
-        - values.yaml
+  sources:
+    # 1. Chart oficial de Prometheus
+    - repoURL: https://github.com/prometheus-community/helm-charts
+      chart: prometheus
+      targetRevision: 29.2.0 # Ajusta a la versión que necesites
+      helm:
+        releaseName: prometheus
+        valueFiles:
+          # Referencia al alias '$values-repo' definido abajo
+          - $values-repo/platform/apps/monitoring/prometheus/values.yaml
+
+    # 2. Tu repositorio de Git para los valores
+    - repoURL: https://github.com/maypi72/eu-githubops.git
+      targetRevision: main
+      ref: values-repo
+  
   destination:
     server: https://kubernetes.default.svc
     namespace: monitoring

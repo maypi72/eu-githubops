@@ -7,14 +7,22 @@ metadata:
     argocd.argoproj.io/sync-wave: "2"
 spec:
   project: platform-project
-  source:
-    repoURL: https://github.com/maypi72/eu-githubops.git
-    targetRevision: main
-    path: platform/apps/monitoring/alertmanager
-    helm:
-      releaseName: alertmanager
-      valueFiles:
-        - values.yaml
+  sources:
+    # 1. Chart oficial de Alertmanager
+    - repoURL: https://prometheus-community.github.io/helm-charts
+      chart: alertmanager
+      targetRevision: 1.34.0 # Versión del chart (ajusta según necesites)
+      helm:
+        releaseName: alertmanager
+        valueFiles:
+          # Referencia a tu repo de Git usando el alias
+          - $values-repo/platform/apps/monitoring/alertmanager/values.yaml
+
+    # 2. Tu repositorio de Git para los valores
+    - repoURL: https://github.com/maypi72/eu-githubops.git
+      targetRevision: main
+      ref: values-repo
+  
   destination:
     server: https://kubernetes.default.svc
     namespace: monitoring
@@ -23,4 +31,4 @@ spec:
       prune: true
       selfHeal: true
     syncOptions:
-      - CreateNamespace=true  
+      - CreateNamespace=true
