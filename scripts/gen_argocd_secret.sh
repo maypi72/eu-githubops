@@ -12,8 +12,16 @@ CERT_PATH="infra/sealed-secrets/pub-cert.pem"
 CI_ENVIRONMENT="${CI:-false}"
 SKIP_GIT_PUSH="${SKIP_GIT_PUSH:-${CI_ENVIRONMENT}}"
 
-# Nueva variable para forzar la actualización del certificado público si es necesario
-FETCH_CERT="${FETCH_CERT:-false}"
+# ⚠️  IMPORTANTE: Controla si descargar el certificado público del cluster
+# DEFAULT=true: Siempre descargará el certificado del cluster en GitHub Actions
+#   - Esto asegura que se use el certificado CORRECTO para sellar secrets
+#   - Si falla la descarga, el script falla explícitamente (no silenciosa fallback)
+#   - Requiere: kubeconfig disponible, kubectl/kubeseal instalados, cluster accesible
+# 
+# Puede sobrescribirse: FETCH_CERT=false ./scripts/gen_argocd_secret.sh
+#   - Usa el archivo local infra/sealed-secrets/pub-cert.pem si existe
+#   - Solo genera certificado temporal si nada está disponible
+FETCH_CERT="${FETCH_CERT:-true}"
 
 echo "::group::Verificando configuración"
 
