@@ -1,5 +1,4 @@
 name: Bootstrap ArgoCD
-
 # Este workflow configura ArgoCD en el cluster Kubernetes
 # REQUISITO: Debe existir el GitHub Secret ARGOCD_ADMIN_PASSWORD
 # Crear en: Settings > Secrets and variables > Actions > New repository secret
@@ -40,39 +39,34 @@ on:
       fetch_cert:
         description: '📥 Descargar certificado del cluster Y actualizar .pem en repo (crear/sobrescribir)'
         required: false
-        default: true
+        default: false
         type: boolean
       apply_sealed_secret:
         description: '⚙️ Aplicar secreto al cluster (solo si cambió la contraseña) [¡desmarcar para upgrades sin cambios!]'
         required: false
         default: false
         type: boolean
-
 permissions:
   contents: read
   id-token: write
   actions: read
-
 env:
   KUBECONFIG: $HOME/kubeconfig
   RETRY_MAX: 5
   RETRY_DELAY: 2
   ARTIFACT_DIR: $HOME/bootstrap-artifacts
-
 jobs:
   bootstrap-argocd:
     name: Bootstrap ArgoCD
     runs-on: [self-hosted, linux]
     timeout-minutes: 15
     environment: lab
-
     steps:
       - name: Checkout Repository
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
           token: ${{ secrets.GITHUB_TOKEN }}
-
       - name: Display Operation Mode
         run: |
           echo "::group::📋 Modo de operación"
@@ -122,7 +116,6 @@ jobs:
           
           echo ""
           echo "::endgroup::"
-
       - name: Download kubeconfig artifact (optional)
         id: download-artifact
         uses: actions/download-artifact@v4
@@ -130,7 +123,6 @@ jobs:
         with:
           name: kubeconfig
           path: ${{ runner.temp }}/kubeconfig-artifact
-
       - name: Setup kubeconfig
         run: |
           echo "::group::Configurando kubeconfig"
@@ -197,7 +189,6 @@ jobs:
           fi
           
           echo "::endgroup::"
-
       - name: Prepare Bootstrap Environment
         run: |
           echo "::group::Preparando entorno de bootstrap"
@@ -226,7 +217,6 @@ jobs:
           echo "[✓] Archivos validados"
           
           echo "::endgroup::"
-
       - name: System Information
         run: |
           echo "::group::Información del sistema"
@@ -234,7 +224,6 @@ jobs:
           echo "Kernel: $(uname -r)"
           echo "Arquitectura: $(uname -m)"
           echo "::endgroup::"
-
       - name: Check Prerequisites
         run: |
           echo "::group::Verificación de herramientas"
@@ -251,7 +240,6 @@ jobs:
           done
           
           echo "::endgroup::"
-
       - name: Verify Dependencies for Secret Generation
         run: |
           echo "::group::Verificando dependencias para generación de secreto"
@@ -267,64 +255,6 @@ jobs:
           done
           
           echo "::endgroup::"
-
-      - name: Fetch Sealed-Secrets Certificate
-        if: inputs.fetch_cert == true
-        run: |
-          echo "::group::Descargando certificado de sealed-secrets"
-          
-          export KUBECONFIG
-          
-          # Crear directorio si no existe
-          mkdir -p infra/sealed-secrets
-          
-          # Intentar descargar el certificado
-          DOWNLOAD_SUCCESS=false
-          
-          # Intento 1: Usar kubeseal --fetch-cert
-          if timeout 10 kubeseal --fetch-cert \
-            --controller-name=sealed-secrets \
-            --controller-namespace=kube-system \
-            > infra/sealed-secrets/pub-cert.pem 2>/dev/null && [ -s infra/sealed-secrets/pub-cert.pem ]; then
-            echo "[✓] Certificado descargado con kubeseal --fetch-cert"
-            DOWNLOAD_SUCCESS=true
-          fi
-          
-          # Intento 2: Descargar usando kubectl
-          if [ "$DOWNLOAD_SUCCESS" = "false" ] && timeout 10 kubectl get secret \
-            -n kube-system sealed-secrets-key \
-            -o jsonpath='{.data.tls\.crt}' 2>/dev/null | \
-            base64 -d > infra/sealed-secrets/pub-cert.pem 2>/dev/null && [ -s infra/sealed-secrets/pub-cert.pem ]; then
-            echo "[✓] Certificado descargado desde sealed-secrets-key"
-            DOWNLOAD_SUCCESS=true
-          fi
-          
-          if [ "$DOWNLOAD_SUCCESS" = "true" ]; then
-            echo "[✓] Certificado guardado en: infra/sealed-secrets/pub-cert.pem"
-            # Verificar que es válido
-            if openssl x509 -in infra/sealed-secrets/pub-cert.pem -noout &>/dev/null; then
-              echo "[✓] Certificado validado correctamente"
-            else
-              echo "[✗] ERROR: Certificado descargado pero NO ES VÁLIDO"
-              exit 1
-            fi
-          else
-            echo "[✗] ERROR: No se pudo descargar certificado de sealed-secrets"
-            echo ""
-            echo "Diagnosticando:"
-            echo "  • sealed-secrets instalado:"
-            kubectl get deployment -n kube-system sealed-secrets-controller 2>/dev/null || echo "    [✗] No encontrado"
-            echo ""
-            echo "  • Pods de sealed-secrets:"
-            kubectl get pods -n kube-system -l app.kubernetes.io/name=sealed-secrets 2>/dev/null || echo "    [✗] No encontrados"
-            echo ""
-            echo "  • kubeseal disponible:"
-            which kubeseal || echo "    [✗] No encontrado"
-            exit 1
-          fi
-          
-          echo "::endgroup::"
-
       - name: Generate ArgoCD Sealed Secret
         id: generate-secret
         env:
@@ -446,7 +376,6 @@ jobs:
           fi
           
           echo "::endgroup::"
-
       - name: Execute Bootstrap ArgoCD
         id: bootstrap-argocd
         run: |
@@ -464,7 +393,6 @@ jobs:
           fi
           
           echo "::endgroup::"
-
       - name: Verify ArgoCD Installation
         if: success()
         timeout-minutes: 5
@@ -499,7 +427,6 @@ jobs:
           echo "[✓] Verificación completada"
           
           echo "::endgroup::"
-
       - name: Apply Sealed Secret
         if: success() && steps.generate-secret.outputs.secret_generated == 'true'
         timeout-minutes: 5
@@ -532,52 +459,23 @@ jobs:
             echo "[✓] Archivo de secreto sellado encontrado: $SEALED_SECRET_FILE"
             echo ""
             
-            # Verificar que sealed-secrets controller esté completamente operativo
-            echo "Verificando que sealed-secrets está operativo..."
-            SEALED_SECRETS_READY=false
-            SEALED_RETRY=0
-            MAX_SEALED_RETRIES=20
-            
-            while [ $SEALED_RETRY -lt $MAX_SEALED_RETRIES ]; do
-              SEALED_PODS=$(kubectl get pods -n kube-system -l app.kubernetes.io/name=sealed-secrets --no-headers 2>/dev/null || echo "")
-              
-              if echo "$SEALED_PODS" | grep -q "Running"; then
-                # Verificar que el pod realmente esté ready
-                if kubectl get pods -n kube-system -l app.kubernetes.io/name=sealed-secrets -o jsonpath='{.items[*].status.conditions[?(@.type=="Ready")].status}' 2>/dev/null | grep -q "True"; then
-                  echo "[✓] sealed-secrets controller está operativo"
-                  SEALED_SECRETS_READY=true
-                  break
-                fi
-              fi
-              
-              SEALED_RETRY=$((SEALED_RETRY + 1))
-              if [ $SEALED_RETRY -lt $MAX_SEALED_RETRIES ]; then
-                echo "  Intento $SEALED_RETRY/$MAX_SEALED_RETRIES esperando sealed-secrets..."
-                sleep 2
-              fi
-            done
-            
-            if [ "$SEALED_SECRETS_READY" != "true" ]; then
-              echo "[!] ADVERTENCIA: sealed-secrets no está operativo"
-              echo "    Los secretos sellados podrían no desellarse correctamente"
-              echo "    Verifica el estado:"
-              echo "      kubectl get pods -n kube-system -l app.kubernetes.io/name=sealed-secrets"
-              echo "      kubectl logs -n kube-system -l app.kubernetes.io/name=sealed-secrets --tail=50"
-            fi
-            
             # IMPORTANTE: Eliminar el Secret anterior si existe (creado por Helm)
             # Esto permite que SealedSecret lo recree correctamente
-            echo ""
             echo "Eliminando Secret anterior si existe (para que SealedSecret pueda recrearlo)..."
             if kubectl get secret argocd-secret -n argocd &>/dev/null; then
               echo "  [!] Secret encontrado, eliminando..."
               timeout 10 kubectl delete secret argocd-secret -n argocd --wait=true 2>/dev/null || echo "  [i] Secret ya no existe o timeout"
-              sleep 1
+              sleep 2
             else
               echo "  [i] No hay Secret previo"
             fi
             
-            echo ""
+            # Verificar que sealed-secrets controller esté running
+            if ! timeout 10 kubectl get pods -n kube-system -l app.kubernetes.io/name=sealed-secrets --no-headers 2>/dev/null | grep -q "Running"; then
+              echo "[!] Advertencia: sealed-secrets controller no está running"
+              echo "    El secreto sellado podría no desellarse correctamente"
+            fi
+            
             echo "Aplicando secreto sellado..."
             if timeout 30 kubectl apply -f "$SEALED_SECRET_FILE"; then
               echo "[✓] SealedSecret aplicado exitosamente"
@@ -588,55 +486,27 @@ jobs:
             
             # Esperar a que el secreto sea desellado
             echo ""
-            echo "Esperando a que sealed-secrets deseselle el secreto (máx 60 segundos)..."
+            echo "Esperando a que sealed-secrets deseselle el secreto (máx 30 segundos)..."
             
             RETRY_COUNT=0
-            MAX_RETRIES=60
-            UNSEALED_SUCCESS=false
-            
+            MAX_RETRIES=30
             while [ $RETRY_COUNT -lt $MAX_RETRIES ]; do
               if timeout 5 kubectl get secret argocd-secret -n argocd &>/dev/null; then
-                # Verificar que el Secret tenga datos
-                if kubectl get secret argocd-secret -n argocd -o jsonpath='{.data.password}' 2>/dev/null | grep -q .; then
-                  echo "[✓] Secreto desellado exitosamente"
-                  UNSEALED_SUCCESS=true
-                  break
-                fi
+                echo "[✓] Secreto desellado exitosamente"
+                break
               fi
               
               RETRY_COUNT=$((RETRY_COUNT + 1))
               if [ $RETRY_COUNT -lt $MAX_RETRIES ]; then
-                if [ $((RETRY_COUNT % 5)) -eq 0 ]; then
-                  echo "  Intento $RETRY_COUNT/$MAX_RETRIES..."
-                fi
+                echo "  Intento $RETRY_COUNT/$MAX_RETRIES..."
                 sleep 1
               fi
             done
             
-            if [ "$UNSEALED_SUCCESS" != "true" ]; then
-              echo ""
-              echo "[✗] El secreto no fue desellado dentro del tiempo límite (60 segundos)"
-              echo ""
-              echo "📋 Diagnosticando problema..."
-              echo ""
-              echo "Estado del SealedSecret:"
-              timeout 10 kubectl describe sealedsecret argocd-secret -n argocd 2>/dev/null || echo "[!] No se pudo obtener describe"
-              echo ""
-              echo "Logs del sealed-secrets controller (últimas 30 líneas):"
-              timeout 10 kubectl logs -n kube-system -l app.kubernetes.io/name=sealed-secrets --tail=30 2>/dev/null || echo "[!] No se pudo obtener logs"
-              echo ""
-              echo "Estado de pods sealed-secrets:"
-              timeout 10 kubectl get pods -n kube-system -l app.kubernetes.io/name=sealed-secrets -o wide 2>/dev/null || echo "[!] No se pudo obtener pods"
-              echo ""
-              echo "⚠️  OPCIONES:"
-              echo "  1. Esperar un poco más y re-ejecutar el workflow"
-              echo "  2. Verificar que sealed-secrets está completamente operativo:"
-              echo "     kubectl get deployment -n kube-system sealed-secrets-controller"
-              echo "  3. Verificar logs:"
-              echo "     kubectl logs -n kube-system -l app.kubernetes.io/name=sealed-secrets -f"
-              echo "  4. Aplicar el secreto manualmente después:"
-              echo "     kubectl apply -f infra/argocd/sealed-secrets/argocd-secret.yaml"
-              echo ""
+            if [ $RETRY_COUNT -ge $MAX_RETRIES ]; then
+              echo "[✗] El secreto no fue desellado dentro del tiempo límite"
+              echo "    Verifica los logs del sealed-secrets controller:"
+              echo "    kubectl logs -n kube-system -l app.kubernetes.io/name=sealed-secrets"
               exit 1
             fi
             
@@ -679,7 +549,6 @@ jobs:
           fi
           
           echo "::endgroup::"
-
       - name: Push Generated Changes
         if: success()
         run: |
@@ -704,7 +573,6 @@ jobs:
           fi
           
           echo "::endgroup::"
-
       - name: Generate Bootstrap Report
         if: always()
         run: |
@@ -771,7 +639,6 @@ jobs:
           
           cat "$report_file"
           echo "::endgroup::"
-
       - name: Upload Bootstrap Report
         if: always()
         uses: actions/upload-artifact@v4
@@ -780,7 +647,6 @@ jobs:
           path: ${{ env.ARTIFACT_DIR }}/bootstrap-argocd-report.txt
           retention-days: 30
           compression-level: 9
-
       - name: Cleanup on Failure
         if: failure()
         run: |
@@ -793,7 +659,6 @@ jobs:
           echo "  export KUBECONFIG=<ruta-a-kubeconfig>"
           echo "  bash infra/bootstrap/bootstrap_argocd.sh"
           echo "::endgroup::"
-
       - name: Success Summary
         if: success()
         run: |

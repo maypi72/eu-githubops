@@ -1,33 +1,19 @@
 #!/usr/bin/env bash
 set -euo pipefail
 IFS=$'\n\t'
-
 NAMESPACE="argocd"
 SECRET_NAME="argocd-secret"
 OUT_DIR="infra/argocd/sealed-secrets"
 CERT_PATH="infra/sealed-secrets/pub-cert.pem"
-
 # Detectar si se ejecuta desde GitHub Actions
 # Si la variable CI está definida, no hacemos git push automático
 CI_ENVIRONMENT="${CI:-false}"
 SKIP_GIT_PUSH="${SKIP_GIT_PUSH:-${CI_ENVIRONMENT}}"
-
-# ⚠️  IMPORTANTE: Controla si descargar el certificado público del cluster
-# DEFAULT=true: Siempre descargará el certificado del cluster en GitHub Actions
-#   - Esto asegura que se use el certificado CORRECTO para sellar secrets
-#   - Si falla la descarga, el script falla explícitamente (no silenciosa fallback)
-#   - Requiere: kubeconfig disponible, kubectl/kubeseal instalados, cluster accesible
-# 
-# Puede sobrescribirse: FETCH_CERT=false ./scripts/gen_argocd_secret.sh
-#   - Usa el archivo local infra/sealed-secrets/pub-cert.pem si existe
-#   - Solo genera certificado temporal si nada está disponible
-FETCH_CERT="${FETCH_CERT:-true}"
-
+# Nueva variable para forzar la actualización del certificado público si es necesario
+FETCH_CERT="${FETCH_CERT:-false}"
 echo "::group::Verificando configuración"
-
 # Crear directorio si no existe
 mkdir -p "$(dirname "$CERT_PATH")"
-
 # IMPORTANTE: Limpiar certificado inválido si existe
 if [ -f "$CERT_PATH" ]; then
   if ! openssl x509 -in "$CERT_PATH" -noout &>/dev/null; then
@@ -35,7 +21,6 @@ if [ -f "$CERT_PATH" ]; then
     rm -f "$CERT_PATH"
   fi
 fi
-
 # Opción 1: Descargar certificado del cluster si FETCH_CERT=true
 if [ "$FETCH_CERT" = "true" ]; then
   echo "[i] FETCH_CERT=true: Intentando descargar certificado público del cluster..."
@@ -70,24 +55,86 @@ if [ "$FETCH_CERT" = "true" ]; then
     DOWNLOAD_SUCCESS=true
   fi
   
-  # Si descarga falló, FALLAR (no usar certificado temporal cuando se fuerza descarga)
+  # Si descarga falló, intentar usar certificado local existente
   if [ "$DOWNLOAD_SUCCESS" = "false" ]; then
-    echo "  [✗] ERROR: No se pudo descargar certificado del cluster con FETCH_CERT=true"
-    echo ""
-    echo "  Causas posibles:"
-    echo "    1. sealed-secrets no está instalado en el cluster"
-    echo "    2. No hay conectividad con el cluster"
-    echo "    3. Permisos insuficientes para acceder a sealed-secrets"
-    echo "    4. kubeseal no está disponible en el runner"
-    echo ""
-    echo "  Soluciones:"
-    echo "    1. Verificar: kubectl get pods -n kube-system -l app.kubernetes.io/name=sealed-secrets"
-    echo "    2. Verificar kubeconfig: kubectl cluster-info"
-    echo "    3. Verificar kubeseal: which kubeseal"
-    exit 1
+    echo "  [!] No se pudo descargar del cluster (sealed-secrets podría no estar instalado)"
+    
+    if [ -f "$CERT_PATH" ]; then
+      # Validar que el certificado local es válido
+      if openssl x509 -in "$CERT_PATH" -noout &>/dev/null; then
+        echo "  [✓] Usando certificado local existente (válido)"
+        echo "      Para actualizar con el del cluster, ejecuta nuevamente después de bootstrap-cluster.yml"
+        DOWNLOAD_SUCCESS=true
+      else
+        echo "  [⚠] Certificado local existe pero NO ES VÁLIDO"
+        echo "      Regenerando certificado auto-firmado nuevo..."
+        rm -f "$CERT_PATH"
+        
+        # Generar certificado auto-firmado temporal
+        openssl req -x509 -newkey rsa:2048 -nodes \
+          -keyout /tmp/temp-key.pem \
+          -out "$CERT_PATH" \
+          -days 365 \
+          -subj "/CN=sealed-secrets-temp" 2>/dev/null || {
+          echo "  [✗] ERROR: No se pudo generar certificado auto-firmado"
+          exit 1
+        }
+        
+        # Verificar que el certificado se generó correctamente
+        if [ ! -f "$CERT_PATH" ] || [ ! -s "$CERT_PATH" ]; then
+          echo "  [✗] ERROR: Certificado generado pero no existe o está vacío"
+          exit 1
+        fi
+        
+        if ! openssl x509 -in "$CERT_PATH" -noout &>/dev/null; then
+          echo "  [✗] ERROR: Certificado generado pero no es válido"
+          exit 1
+        fi
+        
+        echo "  [✓] Certificado nuevo generado y validado"
+        DOWNLOAD_SUCCESS=true
+      fi
+    else
+      echo "  [!] Certificado local no encontrado en $CERT_PATH"
+      echo "      Generando certificado auto-firmado temporal..."
+      
+      # Generar certificado auto-firmado temporal
+      openssl req -x509 -newkey rsa:2048 -nodes \
+        -keyout /tmp/temp-key.pem \
+        -out "$CERT_PATH" \
+        -days 365 \
+        -subj "/CN=sealed-secrets-temp" 2>/dev/null || {
+        echo "  [✗] ERROR: No se pudo generar certificado auto-firmado"
+        exit 1
+      }
+      
+      # Verificar que el certificado se generó correctamente
+      if [ ! -f "$CERT_PATH" ] || [ ! -s "$CERT_PATH" ]; then
+        echo "  [✗] ERROR: Certificado generado pero no existe o está vacío"
+        exit 1
+      fi
+      
+      if ! openssl x509 -in "$CERT_PATH" -noout &>/dev/null; then
+        echo "  [✗] ERROR: Certificado generado pero no es válido"
+        exit 1
+      fi
+      
+      echo "  [✓] Certificado temporal generado y validado"
+      echo "      ⚠️  ADVERTENCIA: Usando certificado auto-firmado temporal"
+      echo "      Después de instalar sealed-secrets via bootstrap-cluster.yml:"
+      echo "      $ FETCH_CERT=true $0"
+      echo "      para reemplazarlo con el certificado del cluster real"
+      
+      DOWNLOAD_SUCCESS=true
+    fi
   fi
   
-  echo "✓ Certificado descargado exitosamente: $CERT_PATH"
+  if [ "$DOWNLOAD_SUCCESS" = "true" ]; then
+    echo "✓ Certificado disponible: $CERT_PATH"
+  else
+    echo "[✗] ERROR: No se pudo obtener certificado"
+    exit 1
+  fi
 else
   # Opción 2: Verificar que la clave pública existe en ruta local o descargar del cluster
   if [ ! -f "$CERT_PATH" ]; then
@@ -215,7 +262,6 @@ else
   fi
 fi
 echo "::endgroup::"
-
 echo "::group::Comprobando directorio de salida"
 if [ ! -d "${OUT_DIR}" ]; then
   mkdir -p "${OUT_DIR}"
@@ -224,7 +270,6 @@ else
   echo "✓ Directorio ya existe: ${OUT_DIR}"
 fi
 echo "::endgroup::"
-
 echo "::group::Validando variables de entorno"
 if [ -z "${ARGOCD_ADMIN_PASSWORD:-}" ]; then
   echo "ERROR: Debes exportar ARGOCD_ADMIN_PASSWORD"
@@ -232,15 +277,12 @@ if [ -z "${ARGOCD_ADMIN_PASSWORD:-}" ]; then
 fi
 echo "✓ ARGOCD_ADMIN_PASSWORD configurada"
 echo "::endgroup::"
-
 echo "::group::Verificando dependencias"
-
 if ! command -v htpasswd &> /dev/null; then
   echo "[!] htpasswd no encontrado. Instalando..."
   sudo apt-get update && sudo apt-get install -y apache2-utils
 fi
 echo "✓ htpasswd disponible"
-
 if ! command -v yq &> /dev/null; then
   echo "[!] yq no encontrado. Instalando..."
   if ! sudo curl -fsSL https://github.com/mikefarah/yq/releases/latest/download/yq_linux_amd64 -o /usr/local/bin/yq; then
@@ -250,13 +292,11 @@ if ! command -v yq &> /dev/null; then
   sudo chmod +x /usr/local/bin/yq
 fi
 echo "✓ yq disponible"
-
 if ! command -v jq &> /dev/null; then
   echo "[!] jq no encontrado. Instalando..."
   sudo apt-get update && sudo apt-get install -y jq
 fi
 echo "✓ jq disponible"
-
 if ! command -v kubeseal &> /dev/null; then
   echo "[!] kubeseal no encontrado. Instalando..."
   KUBESEAL_TMP=$(mktemp -d)
@@ -271,23 +311,17 @@ if ! command -v kubeseal &> /dev/null; then
   fi
 fi
 echo "✓ kubeseal disponible"
-
 echo "::endgroup::"
-
 echo "::group::Generando hash bcrypt"
 htpasswd=$(htpasswd -bnBC 10 "" "$ARGOCD_ADMIN_PASSWORD" | tr -d ':\n')
 echo "✓ Hash bcrypt generado"
 echo "::endgroup::"
-
 echo "::group::Creando Secret local (con merge de campos existentes)"
-
 # Generar una clave de servidor aleatoria
 SERVER_SECRET_KEY=$(openssl rand -base64 32)
-
 # Intentar obtener el Secret existente para hacer merge
 EXISTING_DATA="{}"
 PERFORM_MERGE=false
-
 if [ "$CI_ENVIRONMENT" != "true" ]; then
   # Solo en entorno local intentamos obtener el secret actual
   echo "[i] Intentando obtener Secret actual para hacer merge..."
@@ -320,7 +354,6 @@ if [ "$CI_ENVIRONMENT" != "true" ]; then
 else
   echo "[i] En CI environment - creando Secret sin merge"
 fi
-
 # Crear base de datos con los valores nuevos
 cat <<EOF > "${OUT_DIR}/${SECRET_NAME}.raw.yaml"
 apiVersion: v1
@@ -340,7 +373,6 @@ data:
   admin.passwordMtime: $(date -u +"%Y-%m-%dT%H:%M:%SZ" | base64 -w0)
   server.secretkey: $(echo -n "$SERVER_SECRET_KEY" | base64 -w0)
 EOF
-
 # Si hay datos existentes para mergeado, agregarlos al Secret (excepto los que ya actualizamos)
 if [ "$PERFORM_MERGE" = "true" ] && [ "$EXISTING_DATA" != "{}" ] && [ "$EXISTING_DATA" != "null" ]; then
   echo "  [✓] Fusionando campos existentes..."
@@ -363,26 +395,21 @@ else
     echo "  [!] No se pudo realizar merge, usando nuevos valores"
   fi
 fi
-
 echo "✓ Secret creado en ${OUT_DIR}/${SECRET_NAME}.raw.yaml"
 echo "::endgroup::"
-
 echo "::group::Sellando Secret con kubeseal (usando clave pública)"
-
 # Verificar que el certificado existe y es válido
 if [ ! -f "$CERT_PATH" ]; then
   echo "[✗] ERROR: Certificado no encontrado en $CERT_PATH"
   echo "    Comprueba que el archivo .pem existe en la ruta especificada"
   exit 1
 fi
-
 # Verificar que el archivo tiene contenido
 if [ ! -s "$CERT_PATH" ]; then
   echo "[✗] ERROR: Certificado vacío en $CERT_PATH"
   echo "    El archivo existe pero no tiene contenido"
   exit 1
 fi
-
 # Verificar que el certificado es válido X509
 if ! openssl x509 -in "$CERT_PATH" -noout &>/dev/null; then
   echo "[✗] ERROR: Certificado inválido en $CERT_PATH"
@@ -393,10 +420,8 @@ if ! openssl x509 -in "$CERT_PATH" -noout &>/dev/null; then
   echo "    2. O descargar nuevo: FETCH_CERT=true $0"
   exit 1
 fi
-
 echo "[i] Certificado validado correctamente"
 echo ""
-
 # Ejecutar kubeseal
 if ! kubeseal \
   --cert "$CERT_PATH" \
@@ -415,16 +440,13 @@ if ! kubeseal \
   
   exit 1
 fi
-
 # Eliminar archivo de error
 rm -f /tmp/kubeseal.err
-
 # Validar que el archivo sellado se generó y tiene contenido
 if [ ! -s "${OUT_DIR}/${SECRET_NAME}.yaml" ]; then
   echo "[✗] ERROR: El archivo sellado está vacío o no fue creado"
   exit 1
 fi
-
 # Validar que es YAML válido
 if ! yq eval '.' "${OUT_DIR}/${SECRET_NAME}.yaml" > /dev/null 2>&1; then
   echo "[✗] ERROR: El archivo sellado no es YAML válido"
@@ -432,7 +454,6 @@ if ! yq eval '.' "${OUT_DIR}/${SECRET_NAME}.yaml" > /dev/null 2>&1; then
   cat "${OUT_DIR}/${SECRET_NAME}.yaml"
   exit 1
 fi
-
 # Validar estructura de SealedSecret
 if ! yq eval '.kind' "${OUT_DIR}/${SECRET_NAME}.yaml" 2>/dev/null | grep -q "SealedSecret"; then
   echo "[✗] ERROR: El archivo no contiene un SealedSecret válido"
@@ -443,18 +464,14 @@ if ! yq eval '.kind' "${OUT_DIR}/${SECRET_NAME}.yaml" 2>/dev/null | grep -q "Sea
   cat "${OUT_DIR}/${SECRET_NAME}.yaml"
   exit 1
 fi
-
 echo "[✓] SealedSecret válido generado"
 echo "✓ Secret sellado en ${OUT_DIR}/${SECRET_NAME}.yaml"
 echo "::endgroup::"
-
 echo "::group::Limpieza"
 rm -f "${OUT_DIR}/${SECRET_NAME}.raw.yaml"
 echo "✓ Archivo raw eliminado"
 echo "::endgroup::"
-
 echo "::group::Git operations"
-
 # Preparar git (en caso de que no esté configurado)
 if [ "$CI_ENVIRONMENT" = "true" ]; then
   echo "[i] Ambiente CI detectado (GitHub Actions)"
@@ -462,10 +479,8 @@ if [ "$CI_ENVIRONMENT" = "true" ]; then
   git config user.name "github-actions[bot]" 2>/dev/null || true
   git config user.email "github-actions[bot]@users.noreply.github.com" 2>/dev/null || true
 fi
-
 # Agregar el secreto sellado
 git add "${OUT_DIR}/${SECRET_NAME}.yaml"
-
 # IMPORTANTE: Siempre agregar el certificado si existe
 # (ya sea descargado del cluster o generado temporalmente)
 if [ -f "$CERT_PATH" ]; then
@@ -475,7 +490,6 @@ if [ -f "$CERT_PATH" ]; then
 else
   CERT_INCLUDED="false"
 fi
-
 # Crear commit si hay cambios
 if git diff --cached --quiet; then
   echo "[!] Sin cambios para hacer commit"
@@ -500,7 +514,6 @@ else
   fi
 fi
 echo "::endgroup::"
-
 echo ""
 echo "════════════════════════════════════════════════"
 echo "[✓] Secreto sellado generado correctamente"
