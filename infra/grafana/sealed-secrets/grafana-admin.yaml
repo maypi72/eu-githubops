@@ -1,0 +1,23 @@
+apiVersion: bitnami.com/v1alpha1
+kind: SealedSecret
+metadata:
+  creationTimestamp: null
+  name: grafana-admin
+  namespace: monitoring
+spec:
+  encryptedData:
+    admin-password: AgAiuz7utEdsG9kSCI8moDDDfSQhxG25ben1pH2+OfFWBmZHk6geymbrYAm2+cOiCLnfHIidsH2LuZ5/ay/EWBHDtPMiUgF5nIG1/Qxt76aDR4qsggcNUom0xraeKcL3pJWygpQJ4UzRPhxvM95BdrpxkuZpLwfQYOV2S2VCWlRoLyhc7SSnJwnGlg3wPZZ4+bID4/8Uq+zl8Cf7vOB9MfsQAU+JnGr3cN3zEX8lXVGPbgmUPY67p7eod0Sip2rr8L4ngKbpHIhvlUeCgBiXkRWSmgMrZPqu47wKZfn0v7l0DWu1CqU62n+fYFMgiQ8iMSikkbdtFoCQvvhln/HdHrkOBsDLWWidxpKs5YEfRTkEh5Wx3WQXW0NpNQA0SmX1dP0OWAoMxxBE5c3K5gTYzpdkGyn/y3sUqn6Lh6ok2HdgpGbaJmLf4yn6OLYEfC940Rjj0B9NfqIVnT+YTatQQSKC2PywvbhP8YKOuNd7AiWYQafJiPyGEe9xZCw9dfs0GNC/+R4jJjj88DXmy5pn4s+oIPvx1gkR5qALMEhgH/bMMNtYMeHSCS/f6S+J7RMQzZ7CMVUtbf5tEtKNWBM/Kf9BhT1uqjTSYmXO2RCWZc7SmcKynu5aX9FNdvJuBhBUO+Y0A65+ipuy/4EIY69hmM/HW/jjAQc20qfYLZvw1Brxnk+hCFvBKZPaoLC3+fqkQ/14CgoIOEdU11gw7ocAUj8U
+    admin-user: AgCBIAureRYyppsu58Zmhhx8HpDx3pwnx75NWFI+qVI+vd7zddScmPRxFMGGxx54gFVi8qY5ud+VE9xk6jnwiJL7lp0vdkmeV4n4gz22dWxiNJJUlNyxSCDmreqLNN393kOfgmiohReurd5WuLrPJyEC/Jqb0N1PkZszfhX3qOpknn8TmW+lW1OYVCrwGRnXOGqYjDGBhI3W1P7vaJJ3i66IvyE2dkKJz298E6h24zwpCoTlrHJ19FQcr6pgKvWQlLkyHr9guOjn5XihC4IIrzldPr3DJFSIl43+kFVrqDlsRDojRzsQAB9tOy2SYsqpSjaID1JiHAcrfnsK62q01mcV9Kd7D3gxywAcsAZfvaPDOenukGLvU9ixV56+fbG0NpEPFb8/J/qe4zh0Dqenk1SqE0sdhm1TMZ/di/csvGDOWqbwKVSmRec88SQGDW8opAIpmSckge0At7wuWJDEfSIg/7VyqPfHC9lNfq8vJAtnWBAlT+sFLpmMkXn8oMrRgc3LpS7an7n1V8aYBIgX4BFM63zfSbuiTK6UfldfuWm+eNFxFwjZySBI1GS29eKr8/oVN8jCHpMlbIsKbS67P84bqaXHN2pRF4erxMyrBs09ACwogNPCYPjdrZrUzGB/4sw1vXRyxyVjpbeqcWOluq97TJGgfziFpMDrHfmYE7Dnh23lAqwYi6o01PfqZcg0UG3ZR4QCzg==
+  template:
+    metadata:
+      annotations:
+        argocd.argoproj.io/sync-wave: "0"
+        meta.helm.sh/release-name: grafana
+        meta.helm.sh/release-namespace: monitoring
+      creationTimestamp: null
+      labels:
+        app.kubernetes.io/managed-by: Helm
+      name: grafana-admin
+      namespace: monitoring
+    type: Opaque
+---
