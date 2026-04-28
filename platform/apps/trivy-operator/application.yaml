@@ -3,19 +3,24 @@ kind: Application
 metadata:
   name: trivy-operator
   namespace: argocd
+  annotations:
+    argocd.argoproj.io/sync-wave: "10"
 spec:
   project: platform-project
+
   source:
     repoURL: https://aquasecurity.github.io/helm-charts
     chart: trivy-operator
     targetRevision: 0.29.0
     helm:
       releaseName: trivy-operator
-      valuesFiles:
-        - values.yaml
+      valueFiles:
+        - platform/apps/trivy-operator/values.yaml
+
   destination:
     server: https://kubernetes.default.svc
     namespace: trivy-system
+
   syncPolicy:
     automated:
       prune: true
