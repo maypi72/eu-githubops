@@ -189,21 +189,15 @@ echo "::group::Verificando herramientas requeridas"
 
 # Verificar Terraform
 if ! is_command_available terraform; then
-  if [ "${CI:-false}" = "true" ]; then
-    log_error "Terraform no está instalado en el runner de CI"
-    echo "Por favor instala Terraform en el runner self-hosted o en la imagen base"
-    exit 1
-  fi
-  
   log_warning "Terraform no está instalado. Intentando instalar..."
   
   if is_command_available brew; then
     brew install terraform
     log_success "Terraform instalado con brew"
   elif is_command_available apt-get; then
-    log_info "Necesita privilegios de administrador para instalar Terraform..."
-    wget -O- https://apt.releases.hashicorp.com/gpg | gpg --dearmor | sudo tee /usr/share/keyrings/hashicorp-archive-keyring.gpg > /dev/null
-    echo "deb [signed-by=/usr/share/keyrings/hashicorp-archive-keyring.gpg] https://apt.releases.hashicorp.com $(lsb_release -cs) main" | sudo tee /etc/apt/sources.list.d/hashicorp.list
+    log_info "Instalando Terraform con apt..."
+    curl -fsSL https://apt.releases.hashicorp.com/gpg | sudo apt-key add -
+    sudo apt-add-repository "deb [arch=$(dpkg --print-architecture)] https://apt.releases.hashicorp.com $(lsb_release -cs) main"
     sudo apt-get update && sudo apt-get install -y terraform
     log_success "Terraform instalado con apt"
   else
@@ -217,19 +211,13 @@ fi
 
 # Verificar AWS CLI
 if ! is_command_available aws; then
-  if [ "${CI:-false}" = "true" ]; then
-    log_error "AWS CLI no está instalado en el runner de CI"
-    echo "Por favor instala AWS CLI en el runner self-hosted o en la imagen base"
-    exit 1
-  fi
-  
   log_warning "AWS CLI no está instalado. Intentando instalar..."
   
   if is_command_available brew; then
     brew install awscli
     log_success "AWS CLI instalado con brew"
   elif is_command_available apt-get; then
-    log_info "Necesita privilegios de administrador para instalar AWS CLI..."
+    log_info "Instalando AWS CLI con apt..."
     sudo apt-get update && sudo apt-get install -y awscli
     log_success "AWS CLI instalado con apt"
   else
