@@ -1,34 +1,42 @@
 apiVersion: argoproj.io/v1alpha1
 kind: Application
 metadata:
-  name: observability-grafana
+  name: monitoring-grafana
   namespace: argocd
   annotations:
     argocd.argoproj.io/sync-wave: "3"
 spec:
   project: platform-project
-  sources:
-    # 1. Chart oficial de Grafana
-    - repoURL: https://grafana.github.io/helm-charts
-      chart: grafana
-      targetRevision: 10.5.14 # Versión del chart (ajusta según necesites)
-      helm:
-        releaseName: grafana
-        valueFiles:
-          # Referencia a tu repo de Git usando el alias
-          - $values-repo/platform/apps/monitoring/grafana/values.yaml
 
-    # 2. Tu repositorio de Git para los valores
+  sources:
+    # --- Source 1: Chart Helm remoto (kube-prometheus-stack) ---
+    - repoURL: https://prometheus-community.github.io/helm-charts
+      chart: kube-prometheus-stack
+      targetRevision: 84.2.1
+      helm:
+        releaseName: monitoring-grafana
+        valueFiles:
+          - $values/platform/apps/monitoring/grafana/values.yaml
+
+    # --- Source 2: Tu repo Git (values.yaml) ---
     - repoURL: https://github.com/maypi72/eu-githubops.git
       targetRevision: main
-      ref: values-repo
-  
+      ref: values
+
   destination:
     server: https://kubernetes.default.svc
     namespace: monitoring
+
   syncPolicy:
     automated:
       prune: true
       selfHeal: true
     syncOptions:
       - CreateNamespace=true
+      - ServerSideApply=true
+    retry:
+      limit: 3
+      backoff:
+        duration: 5s
+        factor: 2
+        maxDuration: 3m

@@ -1,34 +1,40 @@
 apiVersion: argoproj.io/v1alpha1
 kind: Application
 metadata:
-  name: observability-alertmanager
+  name: monitoring-alertmanager
   namespace: argocd
   annotations:
     argocd.argoproj.io/sync-wave: "2"
 spec:
   project: platform-project
-  sources:
-    # 1. Chart oficial de Alertmanager
-    - repoURL: https://prometheus-community.github.io/helm-charts
-      chart: alertmanager
-      targetRevision: 1.34.0 # Versión del chart (ajusta según necesites)
-      helm:
-        releaseName: alertmanager
-        valueFiles:
-          # Referencia a tu repo de Git usando el alias
-          - $values-repo/platform/apps/monitoring/alertmanager/values.yaml
 
-    # 2. Tu repositorio de Git para los valores
+  sources:
+    - repoURL: https://prometheus-community.github.io/helm-charts
+      chart: kube-prometheus-stack
+      targetRevision: 84.2.1
+      helm:
+        releaseName: monitoring-alertmanager
+        valueFiles:
+          - $values/platform/apps/monitoring/alertmanager/values.yaml
+
     - repoURL: https://github.com/maypi72/eu-githubops.git
       targetRevision: main
-      ref: values-repo
-  
+      ref: values
+
   destination:
     server: https://kubernetes.default.svc
     namespace: monitoring
+
   syncPolicy:
     automated:
       prune: true
       selfHeal: true
     syncOptions:
       - CreateNamespace=true
+      - ServerSideApply=true
+    retry:
+      limit: 3
+      backoff:
+        duration: 5s
+        factor: 2
+        maxDuration: 3m

@@ -1,34 +1,40 @@
 apiVersion: argoproj.io/v1alpha1
 kind: Application
 metadata:
-  name: observability-prometheus
+  name: monitoring-prometheus
   namespace: argocd
   annotations:
     argocd.argoproj.io/sync-wave: "1"
 spec:
   project: platform-project
-  sources:
-    # 1. Chart oficial de Prometheus
-    - repoURL: https://github.com/prometheus-community/helm-charts
-      chart: prometheus
-      targetRevision: 29.2.0 # Ajusta a la versión que necesites
-      helm:
-        releaseName: prometheus
-        valueFiles:
-          # Referencia al alias '$values-repo' definido abajo
-          - $values-repo/platform/apps/monitoring/prometheus/values.yaml
 
-    # 2. Tu repositorio de Git para los valores
+  sources:
+    - repoURL: https://prometheus-community.github.io/helm-charts
+      chart: kube-prometheus-stack
+      targetRevision: 84.2.1
+      helm:
+        releaseName: monitoring-prometheus
+        valueFiles:
+          - $values/platform/apps/monitoring/prometheus/values.yaml
+
     - repoURL: https://github.com/maypi72/eu-githubops.git
       targetRevision: main
-      ref: values-repo
-  
+      ref: values
+
   destination:
     server: https://kubernetes.default.svc
     namespace: monitoring
+
   syncPolicy:
     automated:
       prune: true
       selfHeal: true
     syncOptions:
       - CreateNamespace=true
+      - ServerSideApply=true
+    retry:
+      limit: 3
+      backoff:
+        duration: 5s
+        factor: 2
+        maxDuration: 3m

@@ -4,6 +4,9 @@ prometheus:
 alertmanager:
   enabled: false
 
+prometheusOperator:
+  enabled: false
+
 grafana:
   enabled: true
 
@@ -17,3 +20,21 @@ grafana:
 
   service:
     type: ClusterIP
+
+  ingress:
+    enabled: true
+    ingressClassName: nginx
+    annotations:
+      cert-manager.io/cluster-issuer: mygitops-ca
+      nginx.ingress.kubernetes.io/backend-protocol: "HTTP"
+      nginx.ingress.kubernetes.io/ssl-redirect: "true"
+      nginx.ingress.kubernetes.io/proxy-body-size: "0"
+      nginx.ingress.kubernetes.io/proxy-read-timeout: "600"
+    hosts:
+      - grafana.local
+    path: /
+    pathType: Prefix
+    tls:
+      - secretName: grafana-tls
+        hosts:
+          - grafana.local
