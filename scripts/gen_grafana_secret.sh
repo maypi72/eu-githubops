@@ -475,14 +475,11 @@ echo "::endgroup::"
 
 echo "::group::Git operations"
 
-# Configurar git si estamos en CI
-if [ "$CI_ENVIRONMENT" = "true" ]; then
-  echo "[i] Ambiente CI detectado (GitHub Actions)"
-  git config user.name "github-actions[bot]" 2>/dev/null || true
-  git config user.email "github-actions[bot]@users.noreply.github.com" 2>/dev/null || true
-fi
+# Configurar git
+git config user.name "github-actions[bot]" 2>/dev/null || true
+git config user.email "github-actions[bot]@users.noreply.github.com" 2>/dev/null || true
 
-# Agregar el secreto sellado (siempre, para que el workflow lo detecte)
+# Agregar el secreto sellado
 git add "${OUT_DIR}/${SECRET_NAME}.yaml"
 
 # IMPORTANTE: Siempre agregar el certificado si existe
@@ -494,27 +491,27 @@ else
   CERT_INCLUDED="false"
 fi
 
-# Solo hacer commit en entorno local
-if [ "$CI_ENVIRONMENT" = "true" ]; then
-  echo "[i] En CI: Archivos en staging para que el workflow haga commit/push"
-else
-  # Crear commit si hay cambios en entorno local
-  if git diff --cached --quiet; then
-    echo "[!] Sin cambios para hacer commit"
+# Crear commit si hay cambios
+if ! git diff --cached --quiet; then
+  # Determinar mensaje del commit
+  if [ "$CERT_INCLUDED" = "true" ] && [ "$FETCH_CERT" = "true" ]; then
+    COMMIT_MSG="chore: update Grafana sealed secret and cluster certificate"
+  elif [ "$CERT_INCLUDED" = "true" ]; then
+    COMMIT_MSG="chore: update Grafana sealed secret with temporary certificate"
   else
-    # Determinar mensaje del commit
-    if [ "$CERT_INCLUDED" = "true" ] && [ "$FETCH_CERT" = "true" ]; then
-      COMMIT_MSG="chore: update Grafana sealed secret and cluster certificate"
-    elif [ "$CERT_INCLUDED" = "true" ]; then
-      COMMIT_MSG="chore: update Grafana sealed secret with temporary certificate"
-    else
-      COMMIT_MSG="chore: update Grafana sealed secret"
-    fi
-    
-    git commit -m "$COMMIT_MSG"
-    git push origin $(git rev-parse --abbrev-ref HEAD)
-    echo "✓ Commit y push realizados"
+    COMMIT_MSG="chore: update Grafana sealed secret"
   fi
+  
+  git commit -m "$COMMIT_MSG"
+  
+  # Hacer push
+  if git push origin $(git rev-parse --abbrev-ref HEAD); then
+    echo "✓ Commit y push realizados"
+  else
+    echo "[!] Push falló (podría estar en CI sin permisos)"
+  fi
+else
+  echo "[!] Sin cambios para hacer commit"
 fi
 
 echo "::endgroup::"
