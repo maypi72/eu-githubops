@@ -7,6 +7,11 @@ IFS=$'\n\t'
 # 1. bootstrap_k3s.sh
 # 2. bootstrap_helm.sh
 # 3. bootstrap_ingress.sh
+# 4. bootstrap_certmanager.sh
+# 5. bootstrap_clusterissuer.sh
+# 6. bootstrap_sealed_secrets.sh
+# 7. bootstrap_localstack.sh
+# 8. bootstrap_argocd.sh (próximamente)
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 BOOTSTRAP_K3S="${SCRIPT_DIR}/bootstrap_k3s.sh"
@@ -15,6 +20,7 @@ BOOTSTRAP_INGRESS="${SCRIPT_DIR}/bootstrap_ingress.sh"
 BOOTSTRAP_CERT_MANAGER="${SCRIPT_DIR}/bootstrap_certmanager.sh"
 BOOTSTRAP_CLUSTERISSUER="${SCRIPT_DIR}/bootstrap_clusterissuer.sh"
 BOOTSTRAP_SEALED_SECRETS="${SCRIPT_DIR}/bootstrap_sealed_secrets.sh"
+BOOTSTRAP_LOCALSTACK="${SCRIPT_DIR}/bootstrap_localstack.sh"
 
 # Variables globales
 KUBECONFIG="${KUBECONFIG:-${HOME}/kubeconfig}"
@@ -26,7 +32,7 @@ echo "BOOTSTRAP COMPLETO - Orquestador"
 echo "================================================"
 
 # Comprobar que todos los scripts existen
-for script in "$BOOTSTRAP_K3S" "$BOOTSTRAP_HELM" "$BOOTSTRAP_INGRESS" "$BOOTSTRAP_CERT_MANAGER" "$BOOTSTRAP_CLUSTERISSUER" "$BOOTSTRAP_SEALED_SECRETS"; do
+for script in "$BOOTSTRAP_K3S" "$BOOTSTRAP_HELM" "$BOOTSTRAP_INGRESS" "$BOOTSTRAP_CERT_MANAGER" "$BOOTSTRAP_CLUSTERISSUER" "$BOOTSTRAP_SEALED_SECRETS" "$BOOTSTRAP_LOCALSTACK"; do
   if [ ! -f "$script" ]; then
     echo "ERROR: Script no encontrado: $script"
     exit 1
@@ -130,6 +136,12 @@ fi
 if ! run_bootstrap "bootstrap_sealed_secrets.sh" "$BOOTSTRAP_SEALED_SECRETS"; then
   FAILED=1
   echo "::warning::Falló la instalación de sealed-secrets, pero bootstrap parcial completado"
+fi
+
+#7. Instalar LocalStack
+if ! run_bootstrap "bootstrap_localstack.sh" "$BOOTSTRAP_LOCALSTACK"; then
+  FAILED=1
+  echo "::warning::Falló la instalación de LocalStack, pero bootstrap parcial completado"
 fi
 echo "::endgroup::"
 
