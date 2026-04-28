@@ -475,32 +475,30 @@ echo "::endgroup::"
 
 echo "::group::Git operations"
 
+# Configurar git si estamos en CI
 if [ "$CI_ENVIRONMENT" = "true" ]; then
   echo "[i] Ambiente CI detectado (GitHub Actions)"
-  echo "[i] El workflow se encargará de git commit y push"
-  echo "    Solo se generó el archivo del secreto"
-  CERT_INCLUDED="false"  # Inicializar para CI
-else
-  # Ejecutar operaciones git solo en entorno local
-  echo "[i] Ambiente local detectado"
-  
-  # Preparar git
   git config user.name "github-actions[bot]" 2>/dev/null || true
   git config user.email "github-actions[bot]@users.noreply.github.com" 2>/dev/null || true
-  
-  # Agregar el secreto sellado
-  git add "${OUT_DIR}/${SECRET_NAME}.yaml"
-  
-  # IMPORTANTE: Siempre agregar el certificado si existe
-  if [ -f "$CERT_PATH" ]; then
-    echo "[i] Certificado detectado - incluyendo en commit"
-    git add "$CERT_PATH"
-    CERT_INCLUDED="true"
-  else
-    CERT_INCLUDED="false"
-  fi
-  
-  # Crear commit si hay cambios
+fi
+
+# Agregar el secreto sellado (siempre, para que el workflow lo detecte)
+git add "${OUT_DIR}/${SECRET_NAME}.yaml"
+
+# IMPORTANTE: Siempre agregar el certificado si existe
+if [ -f "$CERT_PATH" ]; then
+  echo "[i] Certificado detectado - incluyendo en git"
+  git add "$CERT_PATH"
+  CERT_INCLUDED="true"
+else
+  CERT_INCLUDED="false"
+fi
+
+# Solo hacer commit en entorno local
+if [ "$CI_ENVIRONMENT" = "true" ]; then
+  echo "[i] En CI: Archivos en staging para que el workflow haga commit/push"
+else
+  # Crear commit si hay cambios en entorno local
   if git diff --cached --quiet; then
     echo "[!] Sin cambios para hacer commit"
   else
