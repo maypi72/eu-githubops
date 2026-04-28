@@ -22,8 +22,8 @@ redis:
 controller:
   replicas: 1
   resources:
-    requests: { cpu: 150m, memory: 250Mi }
-    limits: { cpu: 500m, memory: 760Mi }
+    requests: { cpu: 150m, memory: 512Mi }
+    limits: { cpu: 500m, memory: 2048Mi }
   # Forzamos al controller a usar plaintext para evitar el ComparisonError
   env:
     - name: ARGOCD_REPO_SERVER_PLAINTEXT
