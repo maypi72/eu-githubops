@@ -112,62 +112,6 @@ log_success "KUBECONFIG disponible: $KUBECONFIG"
 echo "::endgroup::"
 
 # ============================================================================
-# Instalar herramientas necesarias
-# ============================================================================
-
-echo "::group::Verificando herramientas requeridas"
-
-# Verificar y instalar Terraform
-if ! is_command_available terraform; then
-  log_warning "Terraform no está instalado. Instalando..."
-  
-  if is_command_available brew; then
-    brew install terraform
-  elif is_command_available apt-get; then
-    curl -fsSL https://apt.releases.hashicorp.com/gpg | sudo apt-key add -
-    sudo apt-add-repository "deb [arch=$(dpkg --print-architecture)] https://apt.releases.hashicorp.com $(lsb_release -cs) main"
-    sudo apt-get update && sudo apt-get install -y terraform
-  else
-    log_error "No se pudo instalar Terraform automáticamente. Instálalo manualmente."
-    exit 1
-  fi
-  
-  log_success "Terraform instalado"
-else
-  log_success "Terraform ya está instalado: $(terraform version | head -n1)"
-fi
-
-# Verificar e instalar AWS CLI
-if ! is_command_available aws; then
-  log_warning "AWS CLI no está instalado. Instalando..."
-  
-  if is_command_available brew; then
-    brew install awscli
-  elif is_command_available apt-get; then
-    sudo apt-get update && sudo apt-get install -y awscli
-  else
-    log_error "No se pudo instalar AWS CLI automáticamente. Instálalo manualmente."
-    exit 1
-  fi
-  
-  log_success "AWS CLI instalado"
-else
-  log_success "AWS CLI ya está instalado: $(aws --version)"
-fi
-
-# Verificar kubeseal
-if ! is_command_available kubeseal; then
-  log_error "kubeseal no está instalado. Por favor instálalo manualmente:"
-  echo "  wget https://github.com/bitnami-labs/sealed-secrets/releases/download/v0.18.0/kubeseal-0.18.0-linux-amd64.tar.gz"
-  echo "  tar xfz kubeseal-0.18.0-linux-amd64.tar.gz"
-  echo "  sudo mv kubeseal /usr/local/bin/"
-  exit 1
-fi
-
-log_success "kubeseal disponible: $(kubeseal --version)"
-echo "::endgroup::"
-
-# ============================================================================
 # Crear namespace
 # ============================================================================
 
@@ -184,7 +128,7 @@ fi
 echo "::endgroup::"
 
 # ============================================================================
-# Configurar Sealed Secret para credenciales AWS
+# Configurar Sealed Secret para credenciales AWS (PRIMERO)
 # ============================================================================
 
 echo "::group::Configurando Sealed Secret para credenciales AWS"
@@ -235,6 +179,77 @@ else
 fi
 
 rm -f "$TEMP_SECRET"
+echo "::endgroup::"
+
+# ============================================================================
+# Verificar herramientas requeridas (SIN INSTALAR)
+# ============================================================================
+
+echo "::group::Verificando herramientas requeridas"
+
+# Verificar Terraform
+if ! is_command_available terraform; then
+  if [ "${CI:-false}" = "true" ]; then
+    log_error "Terraform no está instalado en el runner de CI"
+    echo "Por favor instala Terraform en el runner self-hosted o en la imagen base"
+    exit 1
+  fi
+  
+  log_warning "Terraform no está instalado. Intentando instalar..."
+  
+  if is_command_available brew; then
+    brew install terraform
+    log_success "Terraform instalado con brew"
+  elif is_command_available apt-get; then
+    log_info "Necesita privilegios de administrador para instalar Terraform..."
+    wget -O- https://apt.releases.hashicorp.com/gpg | gpg --dearmor | sudo tee /usr/share/keyrings/hashicorp-archive-keyring.gpg > /dev/null
+    echo "deb [signed-by=/usr/share/keyrings/hashicorp-archive-keyring.gpg] https://apt.releases.hashicorp.com $(lsb_release -cs) main" | sudo tee /etc/apt/sources.list.d/hashicorp.list
+    sudo apt-get update && sudo apt-get install -y terraform
+    log_success "Terraform instalado con apt"
+  else
+    log_error "No se pudo instalar Terraform. Instálalo manualmente desde:"
+    echo "  https://www.terraform.io/downloads"
+    exit 1
+  fi
+else
+  log_success "Terraform ya está instalado: $(terraform version | head -n1)"
+fi
+
+# Verificar AWS CLI
+if ! is_command_available aws; then
+  if [ "${CI:-false}" = "true" ]; then
+    log_error "AWS CLI no está instalado en el runner de CI"
+    echo "Por favor instala AWS CLI en el runner self-hosted o en la imagen base"
+    exit 1
+  fi
+  
+  log_warning "AWS CLI no está instalado. Intentando instalar..."
+  
+  if is_command_available brew; then
+    brew install awscli
+    log_success "AWS CLI instalado con brew"
+  elif is_command_available apt-get; then
+    log_info "Necesita privilegios de administrador para instalar AWS CLI..."
+    sudo apt-get update && sudo apt-get install -y awscli
+    log_success "AWS CLI instalado con apt"
+  else
+    log_error "No se pudo instalar AWS CLI. Instálalo manualmente desde:"
+    echo "  https://aws.amazon.com/cli/"
+    exit 1
+  fi
+else
+  log_success "AWS CLI ya está instalado: $(aws --version)"
+fi
+
+# Verificar kubeseal
+if ! is_command_available kubeseal; then
+  log_error "kubeseal no está instalado. Por favor instálalo primero:"
+  echo "  https://github.com/bitnami-labs/sealed-secrets/releases"
+  exit 1
+else
+  log_success "kubeseal ya está instalado: $(kubeseal --version)"
+fi
+
 echo "::endgroup::"
 
 # ============================================================================
