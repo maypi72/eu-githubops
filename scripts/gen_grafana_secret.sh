@@ -475,49 +475,49 @@ echo "::endgroup::"
 
 echo "::group::Git operations"
 
-# Preparar git (en caso de que no esté configurado)
 if [ "$CI_ENVIRONMENT" = "true" ]; then
   echo "[i] Ambiente CI detectado (GitHub Actions)"
-  # Configurar git en CI
+  echo "[i] El workflow se encargará de git commit y push"
+  echo "    Solo se generó el archivo del secreto"
+else
+  # Ejecutar operaciones git solo en entorno local
+  echo "[i] Ambiente local detectado"
+  
+  # Preparar git
   git config user.name "github-actions[bot]" 2>/dev/null || true
   git config user.email "github-actions[bot]@users.noreply.github.com" 2>/dev/null || true
-fi
-
-# Agregar el secreto sellado
-git add "${OUT_DIR}/${SECRET_NAME}.yaml"
-
-# IMPORTANTE: Siempre agregar el certificado si existe
-if [ -f "$CERT_PATH" ]; then
-  echo "[i] Certificado detectado - incluyendo en commit"
-  git add "$CERT_PATH"
-  CERT_INCLUDED="true"
-else
-  CERT_INCLUDED="false"
-fi
-
-# Crear commit si hay cambios
-if git diff --cached --quiet; then
-  echo "[!] Sin cambios para hacer commit"
-else
-  # Determinar mensaje del commit
-  if [ "$CERT_INCLUDED" = "true" ] && [ "$FETCH_CERT" = "true" ]; then
-    COMMIT_MSG="chore: update Grafana sealed secret and cluster certificate"
-  elif [ "$CERT_INCLUDED" = "true" ]; then
-    COMMIT_MSG="chore: update Grafana sealed secret with temporary certificate"
+  
+  # Agregar el secreto sellado
+  git add "${OUT_DIR}/${SECRET_NAME}.yaml"
+  
+  # IMPORTANTE: Siempre agregar el certificado si existe
+  if [ -f "$CERT_PATH" ]; then
+    echo "[i] Certificado detectado - incluyendo en commit"
+    git add "$CERT_PATH"
+    CERT_INCLUDED="true"
   else
-    COMMIT_MSG="chore: update Grafana sealed secret"
+    CERT_INCLUDED="false"
   fi
   
-  git commit -m "$COMMIT_MSG"
-  
-  if [ "$SKIP_GIT_PUSH" = "true" ]; then
-    echo "[i] Push skipped (ejecutándose en CI environment)"
-    echo "    El workflow de GitHub Actions hará el push después"
+  # Crear commit si hay cambios
+  if git diff --cached --quiet; then
+    echo "[!] Sin cambios para hacer commit"
   else
+    # Determinar mensaje del commit
+    if [ "$CERT_INCLUDED" = "true" ] && [ "$FETCH_CERT" = "true" ]; then
+      COMMIT_MSG="chore: update Grafana sealed secret and cluster certificate"
+    elif [ "$CERT_INCLUDED" = "true" ]; then
+      COMMIT_MSG="chore: update Grafana sealed secret with temporary certificate"
+    else
+      COMMIT_MSG="chore: update Grafana sealed secret"
+    fi
+    
+    git commit -m "$COMMIT_MSG"
     git push origin $(git rev-parse --abbrev-ref HEAD)
     echo "✓ Commit y push realizados"
   fi
 fi
+
 echo "::endgroup::"
 
 echo ""
