@@ -25,7 +25,7 @@ set -euo pipefail
 IFS=$'\n\t'
 
 # Configuración de rutas y valores
-NAMESPACE="grafana"
+NAMESPACE="monitoring"
 SECRET_NAME="grafana-admin"
 OUT_DIR="infra/grafana/sealed-secrets"
 CERT_PATH="infra/sealed-secrets/pub-cert.pem"
@@ -376,7 +376,7 @@ metadata:
     app.kubernetes.io/managed-by: Helm
   annotations:
     meta.helm.sh/release-name: grafana
-    meta.helm.sh/release-namespace: grafana
+    meta.helm.sh/release-namespace: monitoring
     argocd.argoproj.io/sync-wave: "0"
 type: Opaque
 data:
