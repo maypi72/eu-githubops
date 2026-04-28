@@ -543,3 +543,39 @@ fi
 echo "  • Secreto listo para ser aplicado al cluster"
 echo "  • El namespace 'grafana' será creado automáticamente al desplegar"
 echo "════════════════════════════════════════════════"
+
+# Aplicar el secret al cluster si es entorno local y kubectl está disponible
+echo ""
+echo "::group::Aplicando SealedSecret al cluster"
+
+if [ "$CI_ENVIRONMENT" = "true" ]; then
+  echo "[i] En CI: El SealedSecret será aplicado por ArgoCD"
+  echo "    (No aplicar automáticamente en GitHub Actions)"
+else
+  # En entorno local, intentar aplicar si kubectl está disponible
+  if command -v kubectl &> /dev/null; then
+    echo "[i] kubectl disponible, intentando aplicar SealedSecret..."
+    
+    if kubectl apply -f "${OUT_DIR}/${SECRET_NAME}.yaml"; then
+      echo "✓ SealedSecret aplicado correctamente al cluster"
+      
+      # Verificar que se desselló
+      if kubectl get secret grafana-admin -n monitoring &>/dev/null 2>&1; then
+        echo "✓ Secret desellado correctamente en namespace 'monitoring'"
+        echo "  Puedes verificar con: kubectl get secret grafana-admin -n monitoring"
+      else
+        echo "[!] Secret aún no aparece (sealed-secrets podría estar procesando)"
+      fi
+    else
+      echo "[!] No se pudo aplicar el SealedSecret"
+      echo "    Aplícalo manualmente con:"
+      echo "    kubectl apply -f ${OUT_DIR}/${SECRET_NAME}.yaml"
+    fi
+  else
+    echo "[!] kubectl no está disponible"
+    echo "    Aplica manualmente el SealedSecret con:"
+    echo "    kubectl apply -f ${OUT_DIR}/${SECRET_NAME}.yaml"
+  fi
+fi
+
+echo "::endgroup::"
