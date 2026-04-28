@@ -7,6 +7,8 @@ IFS=$'\n\t'
 # Descripción: Instala LocalStack con AWS S3 en Kubernetes usando Helm,
 #              configura credenciales con Sealed Secrets, crea Ingress,
 #              y ejecuta Terraform.
+# Flujo: Namespace → Secrets → LocalStack → Ingress → Health Check
+#        → Terraform/AWS CLI → Terraform Init → Terraform Apply
 # Requisitos: kubectl, helm, kubeseal, sealed-secrets instalado en cluster
 # ============================================================================
 
@@ -28,8 +30,12 @@ AWS_SECRET_NAME="localstack-aws-credentials"
 
 # Terraform
 TERRAFORM_DIR="${TERRAFORM_DIR:-infra/terraform/localstak}"
-TERRAFORM_VERSION="${TERRAFORM_VERSION:-latest}"
-AWS_CLI_VERSION="${AWS_CLI_VERSION:-latest}"
+
+# Health Check
+HEALTH_PATH="/_localstack/health"
+LS_HOST="localstack.local"
+LOCALSTACK_WAIT_SECONDS=${LOCALSTACK_WAIT_SECONDS:-60}
+TRY_MAX=${TRY_MAX:-12}
 
 # Script dir
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -62,31 +68,12 @@ log_error() {
   echo -e "${RED}[✗]${NC} $*"
 }
 
-retry() {
-  local -r max=${RETRY_MAX:-5}
-  local -r delay=${RETRY_DELAY:-2}
-  local i=0
-  until "$@"; do
-    i=$((i+1))
-    if [ $i -ge $max ]; then
-      log_error "Command failed after $i attempts: $*"
-      return 1
-    fi
-    log_warning "Retry $i/$max: $*"
-    sleep $((delay * i))
-  done
-}
-
 is_command_available() {
   command -v "$1" &>/dev/null
 }
 
 is_namespace_exists() {
   kubectl get namespace "$1" &>/dev/null
-}
-
-is_localstack_installed() {
-  helm list -n "$LOCALSTACK_NAMESPACE" 2>/dev/null | grep -q "^$LOCALSTACK_RELEASE_NAME\s" || return 1
 }
 
 # ============================================================================
@@ -112,10 +99,10 @@ log_success "KUBECONFIG disponible: $KUBECONFIG"
 echo "::endgroup::"
 
 # ============================================================================
-# Crear namespace
+# Crear namespace (si no existe)
 # ============================================================================
 
-echo "::group::Creando namespace $LOCALSTACK_NAMESPACE"
+echo "::group::Creando/Verificando namespace $LOCALSTACK_NAMESPACE"
 
 if is_namespace_exists "$LOCALSTACK_NAMESPACE"; then
   log_success "Namespace '$LOCALSTACK_NAMESPACE' ya existe"
@@ -128,7 +115,7 @@ fi
 echo "::endgroup::"
 
 # ============================================================================
-# Configurar Sealed Secret para credenciales AWS (PRIMERO)
+# Configurar Sealed Secret para credenciales AWS
 # ============================================================================
 
 echo "::group::Configurando Sealed Secret para credenciales AWS"
@@ -182,60 +169,17 @@ rm -f "$TEMP_SECRET"
 echo "::endgroup::"
 
 # ============================================================================
-# Verificar herramientas requeridas (SIN INSTALAR)
+# Verificar kubeseal (REQUERIDO)
 # ============================================================================
 
-echo "::group::Verificando herramientas requeridas"
+echo "::group::Verificando kubeseal"
 
-# Verificar Terraform
-if ! is_command_available terraform; then
-  log_warning "Terraform no está instalado. Intentando instalar..."
-  
-  if is_command_available brew; then
-    brew install terraform
-    log_success "Terraform instalado con brew"
-  elif is_command_available apt-get; then
-    log_info "Instalando Terraform con apt..."
-    curl -fsSL https://apt.releases.hashicorp.com/gpg | sudo apt-key add -
-    sudo apt-add-repository "deb [arch=$(dpkg --print-architecture)] https://apt.releases.hashicorp.com $(lsb_release -cs) main"
-    sudo apt-get update && sudo apt-get install -y terraform
-    log_success "Terraform instalado con apt"
-  else
-    log_error "No se pudo instalar Terraform. Instálalo manualmente desde:"
-    echo "  https://www.terraform.io/downloads"
-    exit 1
-  fi
-else
-  log_success "Terraform ya está instalado: $(terraform version | head -n1)"
-fi
-
-# Verificar AWS CLI
-if ! is_command_available aws; then
-  log_warning "AWS CLI no está instalado. Intentando instalar..."
-  
-  if is_command_available brew; then
-    brew install awscli
-    log_success "AWS CLI instalado con brew"
-  elif is_command_available apt-get; then
-    log_info "Instalando AWS CLI con apt..."
-    sudo apt-get update && sudo apt-get install -y awscli
-    log_success "AWS CLI instalado con apt"
-  else
-    log_error "No se pudo instalar AWS CLI. Instálalo manualmente desde:"
-    echo "  https://aws.amazon.com/cli/"
-    exit 1
-  fi
-else
-  log_success "AWS CLI ya está instalado: $(aws --version)"
-fi
-
-# Verificar kubeseal
 if ! is_command_available kubeseal; then
   log_error "kubeseal no está instalado. Por favor instálalo primero:"
   echo "  https://github.com/bitnami-labs/sealed-secrets/releases"
   exit 1
 else
-  log_success "kubeseal ya está instalado: $(kubeseal --version)"
+  log_success "kubeseal disponible: $(kubeseal --version)"
 fi
 
 echo "::endgroup::"
@@ -263,7 +207,7 @@ fi
 
 # Actualizar repositorios
 log_info "Actualizando repositorios de Helm..."
-if retry helm repo update; then
+if helm repo update; then
   log_success "Repositorios actualizados"
 else
   log_error "Falló al actualizar repositorios"
@@ -278,7 +222,6 @@ echo "::endgroup::"
 
 echo "::group::Instalando LocalStack con Helm"
 
-# Construir valores
 VALUES_FILE="$SCRIPT_DIR/../values/localstack_values.yaml"
 
 if [ ! -f "$VALUES_FILE" ]; then
@@ -304,12 +247,9 @@ if [ -n "$VALUES_FILE" ] && [ -f "$VALUES_FILE" ]; then
   HELM_ARGS+=("--values" "$VALUES_FILE")
 fi
 
-# Agregar valores inline para credenciales y configuración
+# Agregar valores inline para configuración
 HELM_ARGS+=(
-  "--set" "localstack.services=s3"
-  "--set" "localstack.env.AWS_ACCESS_KEY_ID=$AWS_ACCESS_KEY_ID"
-  "--set" "localstack.env.AWS_SECRET_ACCESS_KEY=$AWS_SECRET_ACCESS_KEY"
-  "--set" "localstack.env.AWS_REGION=$AWS_REGION"
+  "--set" "startServices=s3"
 )
 
 if helm "${HELM_ARGS[@]}"; then
@@ -320,59 +260,36 @@ else
 fi
 
 # Esperar a que el pod esté listo
-log_info "Esperando a que LocalStack esté completamente listo..."
+log_info "Esperando a que LocalStack pod esté listo..."
 if kubectl wait --for=condition=ready pod \
   -l app.kubernetes.io/name=localstack \
   -n "$LOCALSTACK_NAMESPACE" \
   --timeout=300s; then
-  log_success "LocalStack está listo"
+  log_success "LocalStack pod está listo"
 else
-  log_warning "Timeout esperando a LocalStack, continuando de todas formas..."
+  log_warning "Timeout esperando a LocalStack pod, continuando de todas formas..."
 fi
 
 echo "::endgroup::"
 
 # ============================================================================
-# Crear Ingress
+# Verificar Ingress (creado automáticamente via Helm values)
 # ============================================================================
 
-echo "::group::Creando Ingress para LocalStack"
+echo "::group::Verificando Ingress para LocalStack"
 
-log_info "Creando Ingress en localstack.local..."
+log_info "El Ingress se creó automáticamente mediante Helm values..."
+log_info "Esperando a que el Ingress esté disponible..."
 
-INGRESS_FILE=$(mktemp)
-cat > "$INGRESS_FILE" << 'EOF'
-apiVersion: networking.k8s.io/v1
-kind: Ingress
-metadata:
-  name: localstack
-  namespace: localstack
-  annotations:
-    nginx.ingress.kubernetes.io/backend-protocol: "HTTP"
-spec:
-  ingressClassName: nginx
-  rules:
-    - host: localstack.local
-      http:
-        paths:
-          - path: /
-            pathType: Prefix
-            backend:
-              service:
-                name: localstack
-                port:
-                  number: 4566
-EOF
+sleep 3
 
-if kubectl apply -f "$INGRESS_FILE"; then
-  log_success "Ingress creado correctamente"
+if kubectl -n "$LOCALSTACK_NAMESPACE" get ingress localstack &>/dev/null; then
+  log_success "Ingress 'localstack' está disponible"
+  kubectl -n "$LOCALSTACK_NAMESPACE" get ingress localstack -o wide
 else
-  log_error "Falló al crear Ingress"
-  rm -f "$INGRESS_FILE"
-  exit 1
+  log_warning "Ingress 'localstack' aún no está disponible"
 fi
 
-rm -f "$INGRESS_FILE"
 echo "::endgroup::"
 
 # ============================================================================
@@ -380,11 +297,6 @@ echo "::endgroup::"
 # ============================================================================
 
 echo "::group::Verificando salud de LocalStack via HTTP"
-
-HEALTH_PATH="/_localstack/health"
-LS_HOST="localstack.local"
-LOCALSTACK_WAIT_SECONDS=${LOCALSTACK_WAIT_SECONDS:-60}
-TRY_MAX=${TRY_MAX:-12}
 
 log_info "Esperando ${LOCALSTACK_WAIT_SECONDS}s a que LocalStack esté healthy..."
 log_info "Endpoint: http://${LS_HOST}${HEALTH_PATH}"
@@ -428,6 +340,72 @@ done
 
 echo "::endgroup::"
 
+# ============================================================================
+# Instalar Terraform y AWS CLI (DESPUÉS de LocalStack)
+# ============================================================================
+
+echo "::group::Instalando Terraform y AWS CLI"
+
+# Instalar Terraform
+if ! is_command_available terraform; then
+  log_warning "Terraform no está instalado. Instalando con apt-get..."
+  log_info "Necesita privilegios de administrador..."
+  
+  curl -fsSL https://apt.releases.hashicorp.com/gpg | sudo apt-key add -
+  sudo apt-add-repository "deb [arch=$(dpkg --print-architecture)] https://apt.releases.hashicorp.com $(lsb_release -cs) main"
+  sudo apt-get update && sudo apt-get install -y terraform
+  
+  log_success "Terraform instalado"
+else
+  log_success "Terraform ya está instalado: $(terraform version | head -n1)"
+fi
+
+# Instalar AWS CLI
+if ! is_command_available aws; then
+  log_warning "AWS CLI no está instalado. Instalando con apt-get..."
+  log_info "Necesita privilegios de administrador..."
+  
+  sudo apt-get update && sudo apt-get install -y awscli
+  
+  log_success "AWS CLI instalado"
+else
+  log_success "AWS CLI ya está instalado: $(aws --version)"
+fi
+
+echo "::endgroup::"
+
+# ============================================================================
+# Inicializar Terraform State
+# ============================================================================
+
+echo "::group::Inicializando Terraform State"
+
+log_info "Ejecutando: scripts/init_tfstate.sh"
+log_info "Esto inicializará Terraform con S3 remoto en LocalStack"
+
+if [ ! -f "$REPO_ROOT/scripts/init_tfstate.sh" ]; then
+  log_error "Script init_tfstate.sh no encontrado"
+  exit 1
+fi
+
+if chmod +x "$REPO_ROOT/scripts/init_tfstate.sh" && \
+   AWS_ACCESS_KEY_ID="$AWS_ACCESS_KEY_ID" \
+   AWS_SECRET_ACCESS_KEY="$AWS_SECRET_ACCESS_KEY" \
+   AWS_REGION="$AWS_REGION" \
+   TERRAFORM_DIR="$TERRAFORM_DIR" \
+   "$REPO_ROOT/scripts/init_tfstate.sh"; then
+  log_success "Terraform state inicializado correctamente"
+else
+  log_error "Falló la inicialización de Terraform state"
+  exit 1
+fi
+
+echo "::endgroup::"
+
+# ============================================================================
+# Ejecutar Terraform Plan y Apply
+# ============================================================================
+
 echo "::group::Ejecutando Terraform"
 
 if [ ! -d "$REPO_ROOT/$TERRAFORM_DIR" ]; then
@@ -438,24 +416,14 @@ fi
 cd "$REPO_ROOT/$TERRAFORM_DIR"
 log_info "Cambio a directorio: $(pwd)"
 
-# Inicializar Terraform
-log_info "Inicializando Terraform..."
-if terraform init \
-  -backend-config="access_key=$AWS_ACCESS_KEY_ID" \
-  -backend-config="secret_key=$AWS_SECRET_ACCESS_KEY"; then
-  log_success "Terraform inicializado"
-else
-  log_error "Falló la inicialización de Terraform"
-  exit 1
-fi
+# Exportar variables para terraform (usando TF_VAR_* para enmascarar en logs)
+export TF_VAR_aws_access_key="$AWS_ACCESS_KEY_ID"
+export TF_VAR_aws_secret_key="$AWS_SECRET_ACCESS_KEY"
+export TF_VAR_aws_region="$AWS_REGION"
 
 # Plan
 log_info "Generando plan de Terraform..."
-if terraform plan \
-  -var="aws_access_key=$AWS_ACCESS_KEY_ID" \
-  -var="aws_secret_key=$AWS_SECRET_ACCESS_KEY" \
-  -var="aws_region=$AWS_REGION" \
-  -out=tfplan; then
+if terraform plan -out=tfplan; then
   log_success "Plan de Terraform generado"
 else
   log_error "Falló la generación del plan de Terraform"
@@ -487,12 +455,12 @@ echo "::endgroup::"
 
 echo ""
 echo "::group::Resumen de la instalación"
-log_success "LocalStack instalado y configurado exitosamente"
+log_success "LocalStack bootstrap completado exitosamente"
 echo ""
 log_info "Detalles:"
 echo "  Namespace: $LOCALSTACK_NAMESPACE"
 echo "  Release Helm: $LOCALSTACK_RELEASE_NAME"
-echo "  Ingress: localstack.local"
+echo "  Ingress (vía Helm): localstack.local"
 echo "  Endpoint S3: http://localstack.local"
 echo ""
 log_info "Verificar estado:"
@@ -500,11 +468,16 @@ echo "  kubectl -n $LOCALSTACK_NAMESPACE get pods"
 echo "  kubectl -n $LOCALSTACK_NAMESPACE get svc"
 echo "  kubectl -n $LOCALSTACK_NAMESPACE get ingress"
 echo ""
-log_info "Credenciales (desde secret sellado):"
-echo "  kubectl -n $LOCALSTACK_NAMESPACE get secret $AWS_SECRET_NAME -o yaml"
+log_info "Para ver detalles del Ingress:"
+echo "  kubectl -n $LOCALSTACK_NAMESPACE describe ingress localstack"
 echo ""
 log_info "Sealed Secret file guardado en:"
 echo "  $SEALED_SECRETS_DIR/${AWS_SECRET_NAME}.yaml"
+echo ""
+log_info "Terraform state:"
+echo "  Location: S3 en LocalStack"
+echo "  Bucket: la-huella-remote-state"
+echo "  Key: global/terraform.tfstate"
 echo "::endgroup::"
 
 exit 0

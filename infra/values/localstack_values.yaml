@@ -89,6 +89,20 @@ securityContext:
   runAsGroup: 1000
   fsGroup: 1000
 
+# Ingress Configuration
+ingress:
+  enabled: true
+  ingressClassName: nginx
+  annotations:
+    nginx.ingress.kubernetes.io/backend-protocol: "HTTP"
+    nginx.ingress.kubernetes.io/proxy-body-size: "0"
+    nginx.ingress.kubernetes.io/proxy-read-timeout: "600"
+  hosts:
+    - host: localstack.local
+      paths:
+        - path: /
+          pathType: Prefix
+
 # Labels y annotations
 labels:
   app: localstack
