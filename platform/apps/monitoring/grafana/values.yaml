@@ -38,3 +38,16 @@ grafana:
       - secretName: grafana-tls
         hosts:
           - grafana.local
+
+  datasources:
+    datasources.yaml:
+      apiVersion: 1
+      datasources:
+        - name: Prometheus
+          type: prometheus
+          url: http://monitoring-prometheus-kube-prometheus:9090
+          access: proxy
+          isDefault: true
+          jsonData:
+            httpMethod: POST
+            timeInterval: 30s
