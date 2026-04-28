@@ -24,7 +24,7 @@ trivy:
       memory: 64Mi
     limits:
       cpu: 200m
-      memory: 256Mi
+      memory: 512Mi
   timeout: 5m
   skipDirs: "/proc,/sys,/dev,/var"
 
@@ -42,7 +42,7 @@ scanners:
   clusterComplianceReport:
     enabled: false
 
-excludeNamespaces: "kube-system,trivy-system,kube-public,kube-node-lease,monitoring"
+excludeNamespaces: "kube-system,trivy-system,kube-public,kube-node-lease,monitoring,argocd"
 nodeCollector:
   enabled: false
 
