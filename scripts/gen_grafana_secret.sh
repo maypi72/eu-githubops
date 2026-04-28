@@ -479,6 +479,7 @@ if [ "$CI_ENVIRONMENT" = "true" ]; then
   echo "[i] Ambiente CI detectado (GitHub Actions)"
   echo "[i] El workflow se encargará de git commit y push"
   echo "    Solo se generó el archivo del secreto"
+  CERT_INCLUDED="false"  # Inicializar para CI
 else
   # Ejecutar operaciones git solo en entorno local
   echo "[i] Ambiente local detectado"
