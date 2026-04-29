@@ -1,0 +1,22 @@
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: app-root
+  namespace: argocd
+spec:
+  project: app-project
+  source:
+    repoURL: https://github.com/maypi72/eu-githubops.git
+    targetRevision: main
+    path: /apps/applications
+    directory:
+      recurse: true
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: argocd
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true

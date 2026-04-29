@@ -1,0 +1,17 @@
+apiVersion: argoproj.io/v1alpha1
+kind: AppProject
+metadata:
+  name: app-project
+  namespace: argocd
+spec:
+  description: "Plataforma GitOps"
+  sourceRepos:
+    - https://github.com/maypi72/eu-githubops.git
+    - https://github.com/maypi72/eu-app-listmonk.git
+    - https://argoproj.github.io/argo-helm
+    - https://github.io
+    - namespace: "*"
+      server: https://kubernetes.default.svc
+  clusterResourceWhitelist:
+    - group: "*"
+      kind: "*"
