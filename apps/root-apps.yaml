@@ -11,6 +11,7 @@ spec:
     path: apps/applications
     directory:
       recurse: true
+      exclude: 'listmonk/{ingress,service-preview,service,rollout,secret,analysis}.yaml'
   destination:
     server: https://kubernetes.default.svc
     namespace: argocd
