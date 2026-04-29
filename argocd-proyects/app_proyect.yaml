@@ -4,14 +4,15 @@ metadata:
   name: app-project
   namespace: argocd
 spec:
-  description: "Plataforma GitOps"
+  description: "GitOps apps"
   sourceRepos:
     - https://github.com/maypi72/eu-githubops.git
     - https://github.com/maypi72/eu-app-listmonk.git
     - https://argoproj.github.io/argo-helm
     - https://github.io
+  destinations:
     - namespace: "*"
-      server: https://kubernetes.default.svc
+      server: "*"
   clusterResourceWhitelist:
     - group: "*"
       kind: "*"
