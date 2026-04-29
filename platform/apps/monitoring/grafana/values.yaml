@@ -39,6 +39,10 @@ grafana:
         hosts:
           - grafana.local
 
+  prometheus:
+    datasource:
+      enabled: false
+
   datasources:
     datasources.yaml:
       apiVersion: 1
@@ -48,6 +52,7 @@ grafana:
           url: http://monitoring-prometheus-kube-prometheus:9090
           access: proxy
           isDefault: true
+          editable: false
           jsonData:
             httpMethod: POST
             timeInterval: 30s
