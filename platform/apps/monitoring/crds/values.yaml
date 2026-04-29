@@ -9,6 +9,8 @@ alertmanager:
 
 prometheusOperator:
   enabled: true
+  crds:
+    enabled: true
   admissionWebhooks:
     enabled: true
     timeoutSeconds: 10

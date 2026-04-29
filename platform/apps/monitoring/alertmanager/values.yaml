@@ -6,6 +6,8 @@ prometheus:
 
 prometheusOperator:
   enabled: true
+  crds:
+    enabled: false
   admissionWebhooks:
     enabled: true
     timeoutSeconds: 10
