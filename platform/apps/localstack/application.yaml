@@ -1,0 +1,31 @@
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: localstack
+  namespace: argocd
+spec:
+  project: platform-project
+
+  sources:
+    - repoURL: https://localstack.github.io/helm-charts
+      chart: localstack
+      targetRevision: 0.7.0
+      helm:
+        releaseName: localstack
+        valueFiles:
+          - $values/platform/apps/localstack/values.yaml
+
+    - repoURL: https://github.com/maypi72/eu-githubops.git
+      targetRevision: main
+      ref: values
+
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: localstack
+
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true

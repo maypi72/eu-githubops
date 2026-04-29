@@ -1,0 +1,33 @@
+image:
+  tag: "latest"
+  pullPolicy: Always
+
+startServices: "s3"
+
+service:
+  type: ClusterIP
+  ports:
+    edge: 4566
+
+extraEnvVars:
+  #- name: DEBUG
+   # value: "1"
+  - name: LOCALSTACK_AUTH_TOKEN
+    value: ""   #versión Community
+
+resources:
+  limits:
+    cpu: "1"
+    memory: "1Gi"
+  requests:
+    cpu: "200m"
+    memory: "256Mi"
+
+
+# Persistencia (opcional)
+persistence:
+  enabled: false
+
+# Logs más detallados
+log:
+  level: debug
