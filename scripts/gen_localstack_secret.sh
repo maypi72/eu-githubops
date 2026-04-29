@@ -341,52 +341,6 @@ echo "✓ kubeseal disponible"
 
 echo "::endgroup::"
 
-echo "::group::Verificando Helm Repository de LocalStack"
-
-# Verificar que helm está instalado
-if ! command -v helm &> /dev/null; then
-  echo "[!] helm no encontrado. Instalando..."
-  if ! curl https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3 | bash; then
-    echo "[!] Advertencia: No se pudo instalar helm (continuando sin validación de repo)"
-  else
-    echo "✓ helm instalado"
-  fi
-else
-  echo "✓ helm disponible"
-fi
-
-# Si helm está disponible, verificar y agregar repo de LocalStack si es necesario
-if command -v helm &> /dev/null; then
-  LOCALSTACK_REPO="https://localstack.github.io/helm-charts"
-  LOCALSTACK_REPO_NAME="localstack"
-  
-  # Verificar si el repo ya existe
-  if helm repo list 2>/dev/null | grep -q "$LOCALSTACK_REPO_NAME"; then
-    echo "[✓] Helm repo '$LOCALSTACK_REPO_NAME' ya está agregado"
-  else
-    echo "[i] Agregando helm repo de LocalStack..."
-    
-    if helm repo add "$LOCALSTACK_REPO_NAME" "$LOCALSTACK_REPO" 2>/dev/null; then
-      echo "[✓] Helm repo '$LOCALSTACK_REPO_NAME' agregado: $LOCALSTACK_REPO"
-      
-      # Actualizar índice de repos
-      if helm repo update "$LOCALSTACK_REPO_NAME" 2>/dev/null; then
-        echo "[✓] Índice de repos actualizado"
-      else
-        echo "[!] Advertencia: No se pudo actualizar el índice de repos (continuando)"
-      fi
-    else
-      echo "[!] Advertencia: No se pudo agregar helm repo de LocalStack"
-      echo "    Puedes agregarlo manualmente con:"
-      echo "    helm repo add $LOCALSTACK_REPO_NAME $LOCALSTACK_REPO"
-    fi
-  fi
-else
-  echo "[!] helm no disponible - omitiendo validación de repo"
-fi
-
-echo "::endgroup::"
-
 echo "::group::Creando Secret local"
 
 # Crear el Secret de LocalStack con las credenciales AWS
@@ -533,6 +487,52 @@ echo "::endgroup::"
 echo "::group::Limpieza"
 rm -f "${OUT_DIR}/${SECRET_NAME}.raw.yaml"
 echo "✓ Archivo raw eliminado"
+echo "::endgroup::"
+
+echo "::group::Verificando Helm Repository de LocalStack"
+
+# Verificar que helm está instalado
+if ! command -v helm &> /dev/null; then
+  echo "[!] helm no encontrado. Instalando..."
+  if ! curl https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3 | bash; then
+    echo "[!] Advertencia: No se pudo instalar helm (continuando sin validación de repo)"
+  else
+    echo "✓ helm instalado"
+  fi
+else
+  echo "✓ helm disponible"
+fi
+
+# Si helm está disponible, verificar y agregar repo de LocalStack si es necesario
+if command -v helm &> /dev/null; then
+  LOCALSTACK_REPO="https://localstack.github.io/helm-charts"
+  LOCALSTACK_REPO_NAME="localstack"
+  
+  # Verificar si el repo ya existe
+  if helm repo list 2>/dev/null | grep -q "$LOCALSTACK_REPO_NAME"; then
+    echo "[✓] Helm repo '$LOCALSTACK_REPO_NAME' ya está agregado"
+  else
+    echo "[i] Agregando helm repo de LocalStack..."
+    
+    if helm repo add "$LOCALSTACK_REPO_NAME" "$LOCALSTACK_REPO" 2>/dev/null; then
+      echo "[✓] Helm repo '$LOCALSTACK_REPO_NAME' agregado: $LOCALSTACK_REPO"
+      
+      # Actualizar índice de repos
+      if helm repo update "$LOCALSTACK_REPO_NAME" 2>/dev/null; then
+        echo "[✓] Índice de repos actualizado"
+      else
+        echo "[!] Advertencia: No se pudo actualizar el índice de repos (continuando)"
+      fi
+    else
+      echo "[!] Advertencia: No se pudo agregar helm repo de LocalStack"
+      echo "    Puedes agregarlo manualmente con:"
+      echo "    helm repo add $LOCALSTACK_REPO_NAME $LOCALSTACK_REPO"
+    fi
+  fi
+else
+  echo "[!] helm no disponible - omitiendo validación de repo"
+fi
+
 echo "::endgroup::"
 
 echo "::group::Git operations"
