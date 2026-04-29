@@ -298,11 +298,21 @@ echo "::endgroup::"
 echo "::group::Validando variables de entorno"
 if [ -z "${AWS_ACCESS_KEY_ID:-}" ]; then
   echo "ERROR: Debes exportar AWS_ACCESS_KEY_ID"
+  echo "Variables recibidas:"
+  echo "  AWS_ACCESS_KEY_ID: ${AWS_ACCESS_KEY_ID:-[vacío]}"
+  echo "  AWS_SECRET_ACCESS_KEY: ${AWS_SECRET_ACCESS_KEY:-[vacío]}"
+  echo "  CI: ${CI:-[no set]}"
+  echo ""
   echo "Uso: AWS_ACCESS_KEY_ID='tu-key' AWS_SECRET_ACCESS_KEY='tu-secret' $0"
   exit 1
 fi
 if [ -z "${AWS_SECRET_ACCESS_KEY:-}" ]; then
   echo "ERROR: Debes exportar AWS_SECRET_ACCESS_KEY"
+  echo "Variables recibidas:"
+  echo "  AWS_ACCESS_KEY_ID: ${AWS_ACCESS_KEY_ID:-[vacío]}"
+  echo "  AWS_SECRET_ACCESS_KEY: ${AWS_SECRET_ACCESS_KEY:-[vacío]}"
+  echo "  CI: ${CI:-[no set]}"
+  echo ""
   echo "Uso: AWS_ACCESS_KEY_ID='tu-key' AWS_SECRET_ACCESS_KEY='tu-secret' $0"
   exit 1
 fi
