@@ -10,6 +10,14 @@ Se ha creado un sistema completo para generar y mantener credenciales AWS sellad
 - **Script de Generación**: `/scripts/gen_localstack_secret.sh`
 - **Salida**: `infra/localstack/sealed-secrets/localstack-credentials.yaml`
 
+### ✨ Características Principales
+
+✅ **Creación automática de namespace** - Si no existe, se crea automáticamente
+✅ **Validación robusta** - YAML, SealedSecret, certificado, acceso al cluster
+✅ **Manejo graceful de errores** - Continúa aunque el cluster no sea accesible
+✅ **Git integration** - Commit y push automáticos
+✅ **Multi-estrategia** - Funciona con/sin acceso al cluster
+
 ## 🔧 Requisitos Previos
 
 ### 1. Secrets en GitHub
@@ -111,7 +119,13 @@ infra/
 
 ## 🔐 Cómo Funciona
 
-### 1. Obtención de Credenciales
+### 1. Verificación del Namespace
+El script verifica automáticamente si el namespace `localstack` existe:
+- ✓ Si existe: continúa
+- ✓ Si no existe: lo crea automáticamente
+- ✓ Si no hay acceso al cluster: continúa de todas formas (graceful degradation)
+
+### 2. Obtención de Credenciales
 Las credenciales vienen de GitHub Secrets:
 - `AWS_ACCESS_KEY_ID`
 - `AWS_SECRET_ACCESS_KEY`
@@ -244,9 +258,13 @@ Si necesitas cambiar las credenciales AWS de LocalStack:
 
 2. **Ejecutar Workflow**:
    - GitHub Actions > "Generate LocalStack Secret"
-   - "Run workflow" con fetch_cert=true (si sealed-secrets está instalado)
+   - "Run workflow" (el namespace se creará automáticamente)
 
-3. **Verificar en cluster**:
+   > **Nota Importante**: El workflow ahora crea automáticamente el namespace `localstack` si no existe.
+   > Si el cluster no es accesible, el script continúa generando el SealedSecret de todas formas,
+   > y puedes crear el namespace manualmente después: `kubectl create namespace localstack`
+
+3. **Verificar en cluster** (después de que ArgoCD sincronice):
    ```bash
    kubectl get sealedsecrets -n localstack
    kubectl get secrets -n localstack

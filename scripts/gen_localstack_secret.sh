@@ -395,6 +395,44 @@ fi
 echo "[i] Certificado validado correctamente"
 echo ""
 
+echo "::group::Verificando namespace en el cluster"
+
+# Verificar si el cluster es accesible
+if ! timeout 10 kubectl cluster-info &>/dev/null; then
+  echo "[⚠] Advertencia: No se puede conectar al cluster"
+  echo "    El namespace no se creará, pero el secreto sellado se generará"
+  echo "    Deberás crear el namespace manualmente o vía ArgoCD:"
+  echo ""
+  echo "    kubectl create namespace ${NAMESPACE}"
+  echo ""
+else
+  echo "[✓] Cluster accesible"
+  
+  # Verificar si el namespace existe
+  if kubectl get namespace "${NAMESPACE}" &>/dev/null; then
+    echo "[✓] Namespace '${NAMESPACE}' ya existe en el cluster"
+  else
+    echo "[i] Namespace '${NAMESPACE}' no existe - creándolo..."
+    
+    # Crear el namespace
+    if kubectl create namespace "${NAMESPACE}" 2>/dev/null; then
+      echo "[✓] Namespace '${NAMESPACE}' creado exitosamente"
+    else
+      echo "[!] No se pudo crear el namespace '${NAMESPACE}'"
+      echo "    Posibles razones:"
+      echo "    • Permisos insuficientes"
+      echo "    • El namespace ya existe pero no fue detectado"
+      echo ""
+      echo "    Puedes crearlo manualmente con:"
+      echo "    kubectl create namespace ${NAMESPACE}"
+      echo ""
+      echo "    Continuando con la generación del secreto sellado..."
+    fi
+  fi
+fi
+
+echo "::endgroup::"
+
 # Ejecutar kubeseal para sellar el Secret
 if ! kubeseal \
   --cert "$CERT_PATH" \
