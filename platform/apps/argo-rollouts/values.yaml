@@ -48,16 +48,16 @@ dashboard:
     ingressClassName: nginx
     annotations:
       cert-manager.io/cluster-issuer: mygitops-ca
+      nginx.ingress.kubernetes.io/ssl-redirect: "true"
     hosts:
-      - host: rollouts.local
+      - host: argo-rollouts.local
         paths:
           - path: /
             pathType: Prefix
-
     tls:
-      - secretName: rollouts-tls
+      - secretName: argo-rollouts-tls
         hosts:
-          - rollouts.local
+          - argo-rollouts.local
 
 # RBAC
 rbac:
