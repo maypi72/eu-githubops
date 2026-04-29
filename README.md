@@ -1,102 +1,749 @@
-# eu-githubops
+# 🏗️ EU-GitHubOps: Laboratorio de GitOps con ArgoCD y Argo Rollouts
 
-Repository para automatizar el bootstrap y configuración de clusters Kubernetes con K3s, Helm e Ingress Controller.
-
-## Índice
-
-- [Instalación y Uso](#instalación-y-uso)
-- [Componentes Core](#componentes-core)
-  - [K3s](#configuración-de-k3s)
-  - [Helm](#helm)
-  - [NGINX Ingress Controller](#nginx-ingress-controller)
-- [Componentes de Operaciones](#componentes-de-operaciones)
-  - [Cert-Manager](#cert-manager)
-  - [Sealed Secrets](#sealed-secrets)
-  - [ArgoCD](#argocd)
-  - [Argo-Rollouts](#argo-rollouts)
-  - [Trivy-Operator](#trivy-operator)
-- [Stack de Observabilidad](#stack-de-observabilidad)
-  - [Grafana](#grafana)
-- [Seguridad del Workflow Bootstrap](#seguridad-del-workflow-bootstrap)
-  - [Kubeconfig](#kubeconfig)
-  - [Artifacts](#artifacts)
-  - [Protecciones de Environment](#protecciones-de-environment)
-  - [Checklist de Seguridad](#checklist-de-seguridad)
-  - [Mejores Prácticas](#mejores-prácticas-adicionales)
+**Un repositorio completo de infraestructura como código (IaC) para desplegar aplicaciones cloud-native en Kubernetes usando GitOps con ArgoCD y estrategias de deployment avanzadas con Argo Rollouts.**
 
 ---
 
-## Instalación y Uso
+## 📌 Descripción General
 
-### Estructura del Proyecto
+`eu-githubops` es un **laboratorio práctico de GitOps** que automatiza completamente:
+
+- ✅ **Bootstrapping de clusters K3s** con herramientas cloud-native
+- ✅ **Gestión declarativa** de aplicaciones mediante ArgoCD
+- ✅ **Deployments avanzados** con Argo Rollouts (Blue-Green, Canary)
+- ✅ **Seguridad** mediante Sealed Secrets y Cert-Manager
+- ✅ **Observabilidad** con Prometheus + Grafana
+- ✅ **CI/CD** integrado con GitHub Actions
+
+El repositorio demuestra un flujo **Production-Ready** donde la infraestructura y aplicaciones son completamente gitopsificadas: **toda configuración vive en git** y GitHub Actions orquesta el despliegue.
+
+### 🎯 Stack Tecnológico
+
+| Componente | Versión | Propósito |
+|---|---|---|
+| **K3s** | v1.30.x | Kubernetes ligero y eficiente |
+| **ArgoCD** | v3.3.6 | GitOps controller declarativo |
+| **Argo Rollouts** | Latest | Deployment avanzados con análisis |
+| **Sealed Secrets** | Latest | Secretos cifrados en git |
+| **Cert-Manager** | Latest | TLS automático con CA privada |
+| **NGINX Ingress** | Latest | Ingress controller |
+| **Prometheus + Grafana** | Latest | Monitoreo y métricas |
+
+---
+
+## 📋 Licencias
+
+### ListMonk - Licencia AGPL v3
+
+[**ListMonk**](https://github.com/knadh/listmonk) es una plataforma de gestión de newsletters **libre y de código abierto** bajo licencia **AGPLv3**.
+
+- **Licencia**: GNU Affero General Public License v3.0
+- **Repositorio oficial**: https://github.com/knadh/listmonk
+- **Características**: Gestión de suscriptores, campañas, automatización
+- **¿Qué significa AGPL v3?**: 
+  - ✅ Libre para usar, modificar y distribuir
+  - ✅ Código fuente debe ser accesible a usuarios
+  - ✅ Cambios al código deben compartirse
+  - ⚠️ Si modificas ListMonk y lo despliegas, debes proporcionar acceso al código fuente
+
+---
+
+## 🗂️ Estructura del Repositorio
+
+```
+eu-githubops/
+│
+├── 📄 README.md                              # Este archivo
+├── 📄 BOOTSTRAP_ARGOCD_GUIDE.md              # Guía detallada de bootstrap de ArgoCD
+├── 📄 ROOTAPP_GUIDE.md                       # Guía: Aplicar root app de ArgoCD
+├── 📄 CLUSTERISSUER_GUIDE.md                 # Guía: Configurar ClusterIssuer para TLS
+├── 📄 LISTMONK_SECRET_GUIDE.md               # Guía: Generar secretos de ListMonk
+├── 📄 LOCALSTACK_GUIDE.md                    # Guía: Configurar LocalStack (AWS local)
+├── 📄 LOCALSTACK_SECRET_GUIDE.md             # Guía: Secretos de LocalStack
+├── 📄 LOCALSTACK_BOOTSTRAP_CHANGES.md        # Cambios en bootstrap para LocalStack
+│
+├── 🔧 infra/                                 # Infraestructura como código (IaC)
+│   ├── bootstrap/                            # Scripts de bootstrap del cluster
+│   │   ├── bootstrap_all.sh                  # ⭐ Ejecuta todos los pasos
+│   │   ├── bootstrap_k3s.sh                  # Instala K3s base
+│   │   ├── bootstrap_helm.sh                 # Instala Helm package manager
+│   │   ├── bootstrap_ingress.sh              # Instala NGINX Ingress Controller
+│   │   ├── bootstrap_certmanager.sh          # Instala Cert-Manager
+│   │   ├── bootstrap_sealed_secrets.sh       # Instala Sealed Secrets
+│   │   ├── bootstrap_argocd.sh               # Instala ArgoCD
+│   │   └── bootstrap_clusterissuer.sh        # Configura ClusterIssuer para TLS
+│   │
+│   ├── argocd/                               # Configuración de ArgoCD
+│   │   └── sealed-secrets/                   # Secretos sellados de ArgoCD
+│   │       └── argocd-secret.yaml            # Credenciales admin (selladas)
+│   │
+│   ├── cert-manager/                         # Configuración de Cert-Manager
+│   │   └── clusterissuer.yaml                # ClusterIssuer para CA privada
+│   │
+│   ├── grafana/                              # Configuración de Grafana
+│   │   └── sealed-secrets/
+│   │       └── grafana-admin.yaml            # Credenciales admin de Grafana (selladas)
+│   │
+│   ├── localstack/                           # Configuración de LocalStack (AWS local)
+│   │   └── sealed-secrets/                   # Credenciales AWS (selladas)
+│   │
+│   ├── sealed-secrets/                       # Certificado público de Sealed Secrets
+│   │   └── pub-cert.pem                      # Certificado para sellar secretos
+│   │
+│   ├── terraform/                            # IaC con Terraform (opcional)
+│   │   └── localstack/
+│   │       ├── main.tf                       # Recursos principales
+│   │       ├── provider.tf                   # Proveedor (Terraform + LocalStack)
+│   │       ├── remote_state.tf               # Estado remoto
+│   │       └── variables.tf                  # Variables
+│   │
+│   └── values/                               # Valores de Helm para componentes
+│       ├── argocd_values.yaml                # Configuración de ArgoCD
+│       ├── cert_manager_values.yaml          # Configuración de Cert-Manager
+│       ├── ingress_values.yaml               # Configuración de NGINX Ingress
+│       ├── localstack_values.yaml            # Configuración de LocalStack
+│       └── sealed_secrets_values.yaml        # Configuración de Sealed Secrets
+│
+├── 🎯 platform/                              # Aplicaciones de PLATAFORMA (gestionadas por ArgoCD)
+│   ├── root-platform.yaml                    # ⭐ Root Application de plataforma
+│   └── apps/                                 # Aplicaciones de infraestructura
+│       ├── argo-rollouts/                    # Argo Rollouts controller
+│       │   ├── application.yaml              # Aplicación ArgoCD
+│       │   ├── ingress.yaml                  # Ingress (acceso Web UI)
+│       │   └── values.yaml                   # Configuración Helm
+│       │
+│       ├── localstack/                       # AWS local para testing
+│       │   ├── application.yaml              # Aplicación ArgoCD
+│       │   ├── ingress.yaml                  # Ingress (acceso Web UI)
+│       │   └── values.yaml                   # Configuración Helm
+│       │
+│       └── monitoring/                       # Stack de observabilidad
+│           ├── alertmanager/                 # Gestor de alertas
+│           ├── crds/                         # Custom Resource Definitions
+│           ├── grafana/                      # Dashboards y visualización
+│           ├── prometheus/                   # Recolector de métricas
+│           └── */application.yaml y values.yaml
+│
+├── 📦 apps/                                  # Aplicaciones de USUARIO (gestionadas por ArgoCD)
+│   ├── root-apps.yaml                        # ⭐ Root Application de apps usuario
+│   └── applications/                         # Aplicaciones de usuario
+│       └── listmonk/                         # 🎯 ListMonk: gestor de newsletters
+│           ├── application.yaml              # Aplicación ArgoCD
+│           ├── rollout.yaml                  # ⭐ Argo Rollout (Blue-Green)
+│           ├── analysis.yaml                 # AnalysisTemplate para métricas
+│           ├── service.yaml                  # Servicio principal
+│           ├── service-preview.yaml          # Servicio preview (slot inactivo)
+│           ├── ingress.yaml                  # Ingress con TLS (listmonk.local)
+│           ├── secret.yaml                   # Secret para credenciales DB
+│           └── README.md                     # Documentación de ListMonk
+│
+├── 🏛️ argocd-projects/                       # Proyectos de ArgoCD (RBAC)
+│   ├── app_proyect.yaml                      # Proyecto para aplicaciones usuario
+│   └── platform_proyect.yaml                 # Proyecto para aplicaciones plataforma
+│
+└── 🔨 scripts/                               # Scripts de utilidad
+    ├── gen_root_plat.sh                      # Aplica root-platform.yaml
+    ├── gen_argocd_secret.sh                  # Genera SealedSecret de ArgoCD
+    ├── gen_grafana_secret.sh                 # Genera SealedSecret de Grafana
+    ├── gen_listmonk_secret.sh                # Genera SealedSecret de ListMonk
+    ├── gen_localstack_secret.sh              # Genera SealedSecret de LocalStack
+    └── init_tfstate.sh                       # Inicializa estado de Terraform
+```
+
+---
+
+## 🏗️ Arquitectura: Dos Capas de GitOps
+
+Este repositorio implementa un **modelo de dos aplicaciones raíz** (multi-root):
+
+### Capa 1: PLATFORM (Infraestructura)
+```
+root-platform.yaml
+    ↓
+    Sincroniza: platform/apps/
+        ├── Argo Rollouts (deployment controller)
+        ├── LocalStack (AWS local)
+        └── Monitoring (Prometheus + Grafana + AlertManager)
+```
+
+**Responsabilidad**: Componentes de infraestructura y operaciones necesarios para que la plataforma funcione.
+
+**Acceso**: `https://argo-rollouts.local` | `https://localstack.local` | Grafana en `monitoring` namespace
+
+---
+
+### Capa 2: APPS (Aplicaciones de Usuario)
+```
+root-apps.yaml
+    ↓
+    Sincroniza: apps/applications/
+        └── listmonk/
+            ├── Rollout (Blue-Green deployment)
+            ├── AnalysisTemplate (validaciones automáticas)
+            ├── Services + Ingress
+            └── Secrets (credenciales DB)
+```
+
+**Responsabilidad**: Aplicaciones de negocio desplegadas y gestionadas por el usuario.
+
+**Acceso**: `https://listmonk.local` (con TLS automático)
+
+---
+
+## 🚀 Flujo de Despliegue: Workflow Completo
+
+El despliegue sigue un **flujo orquestado por GitHub Actions**. El orden es **crítico**:
+
+### Paso 1️⃣: **Bootstrap del Cluster** (`bootstrap-cluster.yml`)
+```bash
+GitHub Actions Workflow "Bootstrap Cluster"
+    ↓
+    Ejecuta: infra/bootstrap/bootstrap_all.sh
+        │
+        ├─ bootstrap_k3s.sh
+        │  └─ Instala: K3s, kubelet, kube-proxy, containerd
+        │
+        ├─ bootstrap_helm.sh
+        │  └─ Instala: Helm package manager
+        │
+        ├─ bootstrap_ingress.sh
+        │  └─ Instala: NGINX Ingress Controller (para enrutar tráfico HTTP/HTTPS)
+        │
+        ├─ bootstrap_certmanager.sh
+        │  └─ Instala: Cert-Manager (para TLS automático)
+        │
+        ├─ bootstrap_sealed_secrets.sh
+        │  └─ Instala: Sealed Secrets (para cifrar secretos en git)
+        │  └─ Genera: infra/sealed-secrets/pub-cert.pem
+        │
+        └─ bootstrap_argocd.sh
+           └─ Instala: ArgoCD v3.3.6
+              └─ ArgoCD está listo para sincronizar aplicaciones
+```
+
+**Duración**: ~5-10 minutos  
+**Salida**: Cluster K3s funcional con ArgoCD operativo
+
+**Validar**:
+```bash
+kubectl get nodes
+kubectl get pods -n argocd
+# ArgoCD accesible en: https://localhost:8080 (port-forward requerido)
+```
+
+---
+
+### Paso 2️⃣: **Bootstrap de ArgoCD** (`bootstrap-argocd.yml` - MANUAL)
+```bash
+GitHub Actions Workflow "Bootstrap ArgoCD"
+    ├─ Prerequisites
+    │  └─ Verifica: kubectl, helm, kubeseal, yq, htpasswd
+    │
+    ├─ Generate ArgoCD Sealed Secret
+    │  ├─ Lee: ARGOCD_ADMIN_PASSWORD (desde GitHub Secrets)
+    │  ├─ Ejecuta: scripts/gen_argocd_secret.sh
+    │  ├─ Genera: infra/argocd/sealed-secrets/argocd-secret.yaml
+    │  └─ Valida: YAML correcto, es un SealedSecret válido
+    │
+    ├─ Execute Bootstrap ArgoCD
+    │  ├─ Crea namespace: argocd
+    │  ├─ Agrega helm repo: https://argoproj.github.io/argo-helm
+    │  └─ Instala: ArgoCD v3.3.6 con valores personalizados
+    │
+    ├─ Apply Sealed Secret
+    │  └─ Aplica: infra/argocd/sealed-secrets/argocd-secret.yaml
+    │     (Sealed Secrets controller lo desencripta automáticamente)
+    │
+    └─ Verify ArgoCD Installation
+       ├─ Verifica: Namespace argocd existe
+       ├─ Verifica: Helm release instalada
+       └─ Salida: URL de acceso + instrucciones de login
+```
+
+**Requisitos previos**:
+- ✅ Cluster K3s con `bootstrap_all.sh` completado
+- ✅ Secret en GitHub: `ARGOCD_ADMIN_PASSWORD`
+- ✅ Certificado Sealed Secrets: `infra/sealed-secrets/pub-cert.pem` generado
+
+**Validar**:
+```bash
+# Port-forward para acceder a ArgoCD
+kubectl port-forward -n argocd svc/argocd-server 8080:443
+# Acceder: https://localhost:8080
+# Usuario: admin
+# Contraseña: (la que creaste en ARGOCD_ADMIN_PASSWORD)
+```
+
+---
+
+### Paso 3️⃣: **Aplicar Root Platform** (Manual: `./scripts/gen_root_plat.sh`)
+```bash
+Script: scripts/gen_root_plat.sh
+    │
+    ├─ Validaciones
+    │  ├─ kubectl disponible
+    │  ├─ Cluster accesible
+    │  ├─ Namespace argocd existe
+    │  └─ ArgoCD instalado
+    │
+    ├─ Aplicar: argocd-projects/platform_proyect.yaml
+    │  └─ Crea: Proyecto de ArgoCD con RBAC para plataforma
+    │
+    ├─ Aplicar: platform/root-platform.yaml
+    │  └─ ArgoCD comienza a sincronizar: platform/apps/
+    │
+    └─ Resultado:
+       ├─ ✅ Argo Rollouts instalado
+       ├─ ✅ LocalStack instalado
+       ├─ ✅ Monitoring (Prometheus, Grafana, AlertManager) sincronizado
+       └─ ArgoCD monitorea cambios en platform/ y sincroniza automáticamente
+```
+
+**Ejecutar**:
+```bash
+./scripts/gen_root_plat.sh
+```
+
+**Validar**:
+```bash
+kubectl get applications -n argocd
+# Deberías ver: platform-root (Synced)
+kubectl get pods -n argo-rollouts
+kubectl get pods -n monitoring
+```
+
+---
+
+### Paso 4️⃣: **Generar Secretos Sellados** (GitHub Actions o Manual)
+
+#### 4a. Secret de ListMonk
+```bash
+GitHub Actions Workflow o Manual
+    ├─ Requiere: GitHub Secret LISTMONK_DB_PASSWORD
+    ├─ Ejecuta: scripts/gen_listmonk_secret.sh
+    ├─ Genera: apps/applications/listmonk/secret.yaml (SealedSecret)
+    └─ Commit+Push: Cambios a git
+```
+
+#### 4b. Secret de Grafana
+```bash
+GitHub Actions Workflow o Manual
+    ├─ Requiere: GitHub Secret GRAFANA_ADMIN_PASSWORD
+    ├─ Ejecuta: scripts/gen_grafana_secret.sh
+    ├─ Genera: infra/grafana/sealed-secrets/grafana-admin.yaml
+    └─ Commit+Push: Cambios a git
+```
+
+#### 4c. Secret de LocalStack (Opcional)
+```bash
+GitHub Actions Workflow o Manual
+    ├─ Requiere: GitHub Secrets AWS_ACCESS_KEY_ID + AWS_SECRET_ACCESS_KEY
+    ├─ Ejecuta: scripts/gen_localstack_secret.sh
+    ├─ Genera: infra/localstack/sealed-secrets/localstack-credentials.yaml
+    └─ Commit+Push: Cambios a git
+```
+
+**Ejecutar manualmente**:
+```bash
+# ListMonk
+export LISTMONK_DB_PASSWORD="tu-contraseña-db"
+./scripts/gen_listmonk_secret.sh
+
+# Grafana
+export GRAFANA_ADMIN_PASSWORD="tu-contraseña-grafana"
+./scripts/gen_grafana_secret.sh
+```
+
+---
+
+### Paso 5️⃣: **Aplicar Aplicaciones de Usuario** (Automático con ArgoCD)
+```bash
+Cuando platform/root-platform.yaml está sincronizado:
+    
+Script: scripts/gen_root_plat.sh (aplicación de apps)
+    │
+    ├─ Aplicar: argocd-projects/app_proyect.yaml
+    │  └─ Crea: Proyecto de ArgoCD para aplicaciones usuario
+    │
+    ├─ Aplicar: apps/root-apps.yaml
+    │  └─ ArgoCD comienza a sincronizar: apps/applications/
+    │
+    └─ Resultado:
+       ├─ ✅ ListMonk Rollout creado
+       ├─ ✅ AnalysisTemplate para métricas listo
+       ├─ ✅ Blue-Green deployment activo
+       └─ ArgoCD monitorea cambios en apps/ y sincroniza automáticamente
+```
+
+**Validar**:
+```bash
+kubectl get applications -n argocd
+# Deberías ver: app-root (Synced)
+
+kubectl get rollouts -n listmonk
+# Deberías ver: listmonk (Healthy)
+
+kubectl get ingress -n listmonk
+# Deberías ver: listmonk con TLS automático
+```
+
+---
+
+## 🌐 Acceso a Servicios y URLs
+
+**⚠️ IMPORTANTE: Editar `/etc/hosts` con la IP del nodo K3s**
+
+Obtén la IP del nodo K3s:
+```bash
+kubectl get nodes -o wide
+# Copia la INTERNAL-IP o EXTERNAL-IP del nodo
+```
+
+Edita `/etc/hosts` (Linux/macOS) o `C:\Windows\System32\drivers\etc\hosts` (Windows):
+```
+<IP-DEL-NODO-K3S>  listmonk.local
+<IP-DEL-NODO-K3S>  argo-rollouts.local
+<IP-DEL-NODO-K3S>  localstack.local
+<IP-DEL-NODO-K3S>  grafana.local
+<IP-DEL-NODO-K3S>  prometheus.local
+<IP-DEL-NODO-K3S>  argocd.local
+```
+
+### URLs de Servicios
+
+| Servicio | URL | Namespace | Tipo |
+|---|---|---|---|
+| **ListMonk** | `https://listmonk.local` | listmonk | Ingress + TLS |
+| **Argo Rollouts** | `https://argo-rollouts.local` | argo-rollouts | Ingress + TLS |
+| **LocalStack** | `https://localstack.local` | localstack | Ingress + TLS |
+| **Prometheus** | `https://prometheus.local` | monitoring | Ingress + TLS |
+| **Grafana** | `https://grafana.local` | monitoring | Ingress + TLS |
+| **ArgoCD** | `https://argocd.local` | argocd | Service (port-forward) |
+
+### Acceso a ArgoCD (Port-Forward)
+```bash
+kubectl port-forward -n argocd svc/argocd-server 8080:443
+# Acceder: https://localhost:8080
+# Usuario: admin
+# Contraseña: (la que definiste en ARGOCD_ADMIN_PASSWORD)
+```
+
+---
+
+## 🎯 ListMonk: Blue-Green Deployment con Argo Rollouts
+
+ListMonk es desplegado con **estrategia Blue-Green** automática:
+
+### Características
+
+```yaml
+Replicas: 2 (Blue) + 2 (Green) = 4 total
+
+Blue Slot (Activo):
+  └─ Service: listmonk (puerto 80 → 9000)
+  └─ Recibe tráfico en: https://listmonk.local
+
+Green Slot (Staging):
+  └─ Service: listmonk-preview
+  └─ Usado para análisis automático pre-promoción
+
+Flujo de Despliegue:
+  1. Nueva imagen llega a Green slot
+  2. AnalysisTemplate ejecuta por 5 minutos
+     ├─ Métrica: success-rate >= 95%
+     ├─ Intervalo: 30 segundos
+     ├─ Muestras requeridas: 10
+     └─ Fallos permitidos: 3
+  3. Si PASA análisis: Promoción automática a Blue
+     └─ Green → Blue (tráfico redirigido)
+  4. Si FALLA análisis: Rollback automático
+     └─ Green descartado, Blue mantiene versión anterior
+```
+
+### Archivo: [rollout.yaml](apps/applications/listmonk/rollout.yaml)
+
+```yaml
+kind: Rollout
+metadata:
+  name: listmonk
+  namespace: listmonk
+spec:
+  replicas: 2
+  strategy:
+    blueGreen:
+      activeService: listmonk           # Blue (activo)
+      previewService: listmonk-preview  # Green (staging)
+      autoPromotionEnabled: true
+      autoPromotionSeconds: 30          # Promover si análisis pasa
+      prePromotionAnalysis:
+        templates:
+          - templateName: listmonk-success-rate
+            args:
+              duration: 5m
+```
+
+### Archivo: [analysis.yaml](apps/applications/listmonk/analysis.yaml)
+
+```yaml
+kind: AnalysisTemplate
+metadata:
+  name: listmonk-success-rate
+spec:
+  metrics:
+    - name: success-rate
+      interval: 30s
+      count: 10                  # 10 muestras × 30s = 5 minutos
+      failureLimit: 3            # Máximo 3 fallos permitidos
+      successCriteria: result >= 95  # Éxito si rate >= 95%
+      provider:
+        prometheus:
+          address: http://prometheus-monitoring:9090
+          query: |
+            sum(rate(http_requests_total{job="listmonk",status=~"2.."}[5m])) /
+            sum(rate(http_requests_total{job="listmonk"}[5m])) * 100
+```
+
+### Monitorear Rollout
+
+```bash
+# Ver estado
+kubectl get rollouts -n listmonk
+kubectl describe rollout listmonk -n listmonk
+
+# Ver análisis en tiempo real
+kubectl describe analysisrun -n listmonk
+
+# Logs de Argo Rollouts controller
+kubectl logs -n argo-rollouts deployment/argo-rollouts -f
+```
+
+---
+
+## 🔒 Seguridad: Secretos Sellados (Sealed Secrets)
+
+Todos los secretos en git están **encriptados**:
 
 ```
 infra/
-├── bootstrap/
-│   ├── bootstrap_all.sh                    # Script principal que ejecuta todos los pasos
-│   ├── bootstrap_k3s.sh                    # Instalación de K3s base
-│   ├── bootstrap_helm.sh                   # Instalación de gestor de paquetes Helm
-│   ├── bootstrap_ingress.sh                # Instalación de NGINX Ingress Controller
-│   ├── bootstrap_certmanager.sh            # Instalación de Cert-Manager
-│   ├── bootstrap_sealed_secrets.sh         # Instalación de Sealed Secrets
-│   ├── bootstrap_argocd.sh                 # Instalación de ArgoCD
-│   └── bootstrap_clusterissuer.sh          # Configuración de ClusterIssuers
-├── argocd/
-│   └── sealed-secrets/
-│       └── argocd-secret.yaml              # SealedSecret para credenciales de ArgoCD
-├── grafana/
-│   └── sealed-secrets/
-│       └── grafana-admin.yaml              # SealedSecret para credenciales de Grafana
-└── values/
-    ├── argocd_values.yaml                  # Configuración para ArgoCD
-    ├── cert_manager_values.yaml            # Configuración para Cert-Manager
-    ├── ingress_values.yaml                 # Configuración para NGINX Ingress
-    └── sealed_secrets_values.yaml          # Configuración para Sealed Secrets
+├── argocd/sealed-secrets/argocd-secret.yaml          ← Encriptado
+├── grafana/sealed-secrets/grafana-admin.yaml         ← Encriptado
+└── localstack/sealed-secrets/localstack-creds.yaml   ← Encriptado
 
-platform/
-├── root-platform.yaml                      # Aplicación raíz de ArgoCD
-├── apps/                                   # Aplicaciones de la plataforma
-└── argo-rollouts/
-    ├── application.yaml                    # Configuración de Argo-Rollouts
-    └── argo-rollouts-app/
-        ├── kustomization.yaml              # Definición Kustomize
-        └── values.yaml                     # Valores para Argo-Rollouts
-
-argocd-projects/
-└── platform_project.yaml                   # Proyecto de ArgoCD para plataforma
+apps/
+└── applications/listmonk/secret.yaml                  ← Encriptado
 ```
 
-### Ejecutar Workflow
+### Cómo Funciona
 
-1. Ve a **Actions → Bootstrap Cluster**
-2. Click **"Run workflow"**
-3. Configura los inputs si es necesario:
-   - `k3s_version`: Versión de K3s (default: `v1.30.0+k3s1`)
-   - `helm_repos`: Repositorios de Helm (default: vacío)
-   - `dry_run`: Ejecutar sin cambios (default: `false`)
-4. El workflow ejecutará mediante `bootstrap_all.sh` todos los pasos:
-   - ✅ K3s base
-   - ✅ Helm
-   - ✅ NGINX Ingress
-   - ✅ Cert-Manager
-   - ✅ Sealed Secrets
-   - ✅ ArgoCD
-   - ✅ ClusterIssuers (opcional)
+1. **Generación**: Script `gen_*_secret.sh` genera un `SealedSecret`
+   ```bash
+   echo -n 'password-secreto' | kubeseal -f - -n namespace > secret.yaml
+   ```
 
-### Instalación Manual
+2. **Git**: El `SealedSecret` se comitea (está encriptado, seguro)
 
-También puedes ejecutar cada script manualmente en el orden especificado:
+3. **ArgoCD**: ArgoCD aplica el `SealedSecret`
 
+4. **Sealed Secrets Controller**: Desencripta automáticamente en el cluster
+   ```
+   SealedSecret (encriptado en git)
+        ↓
+   Sealed Secrets Controller (en cluster)
+        ↓
+   Secret normal (desencriptado en memoria)
+   ```
+
+### GitHub Secrets Requeridos
+
+Configura estos en: **Settings → Secrets and variables → Actions**
+
+```
+ARGOCD_ADMIN_PASSWORD           # Contraseña admin de ArgoCD
+LISTMONK_DB_PASSWORD            # Contraseña de PostgreSQL para ListMonk
+GRAFANA_ADMIN_PASSWORD          # Contraseña admin de Grafana
+AWS_ACCESS_KEY_ID               # (Opcional) Para LocalStack
+AWS_SECRET_ACCESS_KEY           # (Opcional) Para LocalStack
+```
+
+---
+
+## 📊 Stack de Observabilidad
+
+El repositorio incluye **Prometheus + Grafana + AlertManager**:
+
+### Componentes
+
+- **Prometheus** (`platform/apps/monitoring/prometheus/`)
+  - Recolecta métricas de Kubernetes y aplicaciones
+  - URL: `https://prometheus.local`
+  - Consultas PromQL para análisis de ListMonk
+
+- **Grafana** (`platform/apps/monitoring/grafana/`)
+  - Dashboards de visualización
+  - URL: `https://grafana.local`
+  - Usuario: `admin`
+  - Contraseña: (GitHub Secret `GRAFANA_ADMIN_PASSWORD`)
+
+- **AlertManager** (`platform/apps/monitoring/alertmanager/`)
+  - Gestión de alertas
+  - Integración con webhooks, email, Slack, etc.
+
+### Metrica de ListMonk
+
+El AnalysisTemplate de ListMonk consulta Prometheus:
+```promql
+sum(rate(http_requests_total{job="listmonk",status=~"2.."}[5m])) /
+sum(rate(http_requests_total{job="listmonk"}[5m])) * 100
+```
+
+Esto calcula el **porcentaje de requests exitosos** (status 2xx).
+
+---
+
+## ⚙️ Instalación Manual (Paso a Paso)
+
+Si prefieres no usar los workflows de GitHub Actions:
+
+### 1. Clonar Repositorio
 ```bash
-# 1. K3s y dependencias base
+git clone https://github.com/maypi72/eu-githubops.git
+cd eu-githubops
+```
+
+### 2. Configurar Kubectl
+```bash
+# Asegúrate que KUBECONFIG apunta al cluster correcto
+export KUBECONFIG=/path/to/k3s/kubeconfig.yaml
+kubectl cluster-info
+```
+
+### 3. Ejecutar Bootstrap
+```bash
+# Opción A: Todo de una vez
+./infra/bootstrap/bootstrap_all.sh
+
+# Opción B: Paso a paso
 ./infra/bootstrap/bootstrap_k3s.sh
 ./infra/bootstrap/bootstrap_helm.sh
 ./infra/bootstrap/bootstrap_ingress.sh
-
-# 2. Componentes de operaciones
 ./infra/bootstrap/bootstrap_certmanager.sh
 ./infra/bootstrap/bootstrap_sealed_secrets.sh
 ./infra/bootstrap/bootstrap_argocd.sh
+```
+
+### 4. Generar Secrets
+```bash
+# ListMonk
+export LISTMONK_DB_PASSWORD="tu-password"
+./scripts/gen_listmonk_secret.sh
+
+# Grafana
+export GRAFANA_ADMIN_PASSWORD="tu-password"
+./scripts/gen_grafana_secret.sh
+
+# ArgoCD (manual si no está generado)
+export ARGOCD_ADMIN_PASSWORD="tu-password"
+./scripts/gen_argocd_secret.sh
+```
+
+### 5. Aplicar Root Apps
+```bash
+# Platform
+./scripts/gen_root_plat.sh
+
+# Apps (modificar script si es necesario para app-root)
+kubectl apply -f argocd-projects/app_proyect.yaml
+kubectl apply -f apps/root-apps.yaml
+```
+
+### 6. Verificar Despliegue
+```bash
+kubectl get applications -n argocd
+kubectl get rollouts -n listmonk
+kubectl get ingress -A
+```
+
+---
+
+## 🐛 Troubleshooting
+
+### ArgoCD no sincroniza
+```bash
+# Verificar Application status
+kubectl describe application platform-root -n argocd
+
+# Verificar ArgoCD controller logs
+kubectl logs -n argocd deployment/argocd-application-controller -f
+
+# Forzar sincronización
+argocd app sync platform-root
+```
+
+### ListMonk Rollout no promociona
+```bash
+# Ver análisis
+kubectl describe analysisrun -n listmonk
+
+# Ver logs de Argo Rollouts
+kubectl logs -n argo-rollouts deployment/argo-rollouts -f
+
+# Ver métricas en Prometheus
+# Navega a: https://prometheus.local/graph?query=...
+```
+
+### Sealed Secrets: "cannot decrypt seal"
+```bash
+# Verificar certificado
+kubectl get sealedsecrets -A
+kubectl logs -n kube-system -l app.kubernetes.io/name=sealed-secrets
+
+# Regenerar si es necesario
+./infra/bootstrap/bootstrap_sealed_secrets.sh
+```
+
+### TLS certificate errors
+```bash
+# Verificar ClusterIssuer
+kubectl describe clusterissuer mygitops-ca
+
+# Verificar cert-manager
+kubectl logs -n cert-manager deployment/cert-manager -f
+
+# Ver certificados
+kubectl get certificates -A
+```
+
+---
+
+## 📚 Documentación Adicional
+
+- [BOOTSTRAP_ARGOCD_GUIDE.md](BOOTSTRAP_ARGOCD_GUIDE.md) - Guía detallada de ArgoCD
+- [ROOTAPP_GUIDE.md](ROOTAPP_GUIDE.md) - Aplicar root-platform.yaml y root-apps.yaml
+- [CLUSTERISSUER_GUIDE.md](CLUSTERISSUER_GUIDE.md) - Configurar TLS automático
+- [LISTMONK_SECRET_GUIDE.md](LISTMONK_SECRET_GUIDE.md) - Generar secretos de ListMonk
+- [LOCALSTACK_GUIDE.md](LOCALSTACK_GUIDE.md) - AWS local para testing
+- [LOCALSTACK_SECRET_GUIDE.md](LOCALSTACK_SECRET_GUIDE.md) - Secretos de LocalStack
+
+---
+
+## 🤝 Contribuciones
+
+Este es un laboratorio educativo. Siéntete libre de:
+- ✅ Hacer fork y experimentar
+- ✅ Reportar issues
+- ✅ Sugerir mejoras
+
+---
+
+## 📄 Licencia
+
+Este repositorio está bajo licencia **MIT**.
+
+ListMonk (aplicación incluida) está bajo licencia **AGPL v3** (ver https://github.com/knadh/listmonk/blob/master/LICENSE)
+
+---
+
+**Hecho con ❤️ para laboratorios de GitOps y Cloud-Native**
 
 # 3. Configuración de ClusterIssuers (opcional)
 ./infra/bootstrap/bootstrap_clusterissuer.sh
