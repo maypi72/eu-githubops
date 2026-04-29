@@ -7,6 +7,12 @@ alertmanager:
 prometheusOperator:
   enabled: false
 
+prometheus-node-exporter:
+  enabled: false
+
+kubeStateMetrics:
+  enabled: false
+
 grafana:
   enabled: true
 

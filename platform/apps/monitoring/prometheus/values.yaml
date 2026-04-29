@@ -17,6 +17,12 @@ prometheusOperator:
       cpu: 500m
       memory: 512Mi
 
+prometheus-node-exporter:
+  enabled: true
+
+kubeStateMetrics:
+  enabled: true
+
 prometheus:
   enabled: true
   prometheusSpec:

@@ -17,6 +17,12 @@ prometheusOperator:
       cpu: 500m
       memory: 512Mi
 
+prometheus-node-exporter:
+  enabled: false
+
+kubeStateMetrics:
+  enabled: false
+
 alertmanager:
   enabled: true
   alertmanagerSpec:
