@@ -42,22 +42,9 @@ dashboard:
     type: ClusterIP
     port: 3100
 
-  # Ingress para acceder al dashboard
+  # Ingress deshabilitado - se crea manualmente
   ingress:
-    enabled: true
-    ingressClassName: nginx
-    annotations:
-      cert-manager.io/cluster-issuer: mygitops-ca
-      nginx.ingress.kubernetes.io/ssl-redirect: "true"
-    hosts:
-      - host: argo-rollouts.local
-        paths:
-          - path: /
-            pathType: Prefix
-    tls:
-      - secretName: argo-rollouts-tls
-        hosts:
-          - argo-rollouts.local
+    enabled: false
 
 # RBAC
 rbac:
