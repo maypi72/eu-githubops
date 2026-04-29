@@ -1,0 +1,18 @@
+apiVersion: argoproj.io/v1alpha1
+kind: AnalysisTemplate
+metadata:
+  name: listmonk-success-rate
+  namespace: listmonk
+spec:
+  metrics:
+    - name: success-rate
+      interval: 30s
+      failureLimit: 3
+      successCriteria: result >= 95
+      # Métrica de Prometheus (si tienes Prometheus)
+      provider:
+        prometheus:
+          address: http://prometheus-monitoring-kube-prometheus:9090
+          query: |
+            sum(rate(http_requests_total{job="listmonk",status=~"2.."}[5m])) /
+            sum(rate(http_requests_total{job="listmonk"}[5m])) * 100

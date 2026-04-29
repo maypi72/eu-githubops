@@ -1,0 +1,96 @@
+apiVersion: argoproj.io/v1alpha1
+kind: Rollout
+metadata:
+  name: listmonk
+  namespace: listmonk
+  labels:
+    app: listmonk
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: listmonk
+  
+  # Estrategia Blue-Green
+  strategy:
+    blueGreen:
+      # El servicio activo apunta siempre a activeSlot
+      activeService: listmonk
+      # Servicio preview para validar la nueva versión
+      previewService: listmonk-preview
+      # Slot actual (blue o green)
+      autoPromotionEnabled: true
+      # Promoción automática después de validaciones
+      autoPromotionSeconds: 30
+      # Esperar antes de promover a versión antigua
+      prePromotionAnalysis:
+        templates:
+          - templateName: listmonk-success-rate
+            args:
+              duration: 5m
+  
+  template:
+    metadata:
+      labels:
+        app: listmonk
+    spec:
+      containers:
+        - name: listmonk
+          image: ghcr.io/maypi72/listmonk:latest
+          imagePullPolicy: Always
+          ports:
+            - name: http
+              containerPort: 9000
+              protocol: TCP
+          
+          # Probes para validación
+          readinessProbe:
+            httpGet:
+              path: /
+              port: http
+            initialDelaySeconds: 10
+            periodSeconds: 10
+            failureThreshold: 3
+            timeoutSeconds: 5
+          
+          livenessProbe:
+            httpGet:
+              path: /
+              port: http
+            initialDelaySeconds: 30
+            periodSeconds: 20
+            failureThreshold: 3
+            timeoutSeconds: 5
+          
+          # Recursos
+          resources:
+            requests:
+              cpu: 100m
+              memory: 128Mi
+            limits:
+              cpu: 500m
+              memory: 512Mi
+          
+          # Environment
+          env:
+            - name: LISTMONK_db__host
+              value: "postgres.default.svc.cluster.local"
+            - name: LISTMONK_db__user
+              value: "listmonk"
+            - name: LISTMONK_db__password
+              valueFrom:
+                secretKeyRef:
+                  name: listmonk-db
+                  key: password
+            - name: LISTMONK_db__database
+              value: "listmonk"
+            - name: LISTMONK_admin__address
+              value: "0.0.0.0:9000"
+          
+          # Security context
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: false
+            runAsNonRoot: false
+      
+      # Affinity deshabilitada para single-node cluster

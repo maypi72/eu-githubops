@@ -1,0 +1,24 @@
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: listmonk
+  namespace: listmonk
+  annotations:
+    cert-manager.io/cluster-issuer: mygitops-ca
+spec:
+  ingressClassName: nginx
+  rules:
+    - host: listmonk.local
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: listmonk
+                port:
+                  number: 80
+  tls:
+    - hosts:
+        - listmonk.local
+      secretName: listmonk-tls

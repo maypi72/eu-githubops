@@ -1,0 +1,16 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: listmonk-preview
+  namespace: listmonk
+  labels:
+    app: listmonk
+spec:
+  ports:
+    - port: 80
+      targetPort: http
+      protocol: TCP
+      name: http
+  selector:
+    app: listmonk
+  type: ClusterIP
