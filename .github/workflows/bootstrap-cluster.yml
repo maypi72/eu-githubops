@@ -1,86 +1,145 @@
-
 name: Bootstrap Cluster
+
 on:
   workflow_dispatch:
     inputs:
       install_all:
+        description: "Instalar TODO (K3s + Helm + Ingress + Cert-Manager + Sealed-Secrets)"
         type: boolean
         default: false
+
       k3s_version:
+        description: "Versión de K3s"
         type: string
-        default: 'v1.34.4+k3s1'
+        default: "v1.34.4+k3s1"
+
       install_k3s:
+        description: "Instalar K3s (requerido para el resto)"
         type: boolean
         default: true
+
       install_helm:
+        description: "Instalar Helm"
         type: boolean
         default: false
+
       install_ingress:
+        description: "Instalar Ingress"
         type: boolean
         default: false
+
       install_cert_manager:
+        description: "Instalar Cert-Manager"
         type: boolean
         default: false
+
       install_sealed_secrets:
+        description: "Instalar Sealed-Secrets"
         type: boolean
         default: false
+
       dry_run:
+        description: "Dry-run (no ejecutar cambios)"
         type: boolean
         default: false
+
 permissions:
   contents: read
   id-token: write
+
 concurrency:
   group: bootstrap-cluster
   cancel-in-progress: true
+
 env:
-  INSTALL_ALL: ${{ inputs.install_all == 'true' }}
-  DRY_RUN: ${{ inputs.dry_run == 'true' }}
-  KUBECONFIG: $HOME/kubeconfig
+  KUBECONFIG: $HOME/.kube/config
+
+# =========================================================
+# JOB 0 – NORMALIZE INPUTS
+# =========================================================
 jobs:
-# =========================
+  normalize-inputs:
+    name: Normalize Inputs
+    runs-on: ubuntu-latest
+    outputs:
+      install_k3s: ${{ steps.norm.outputs.install_k3s }}
+      install_helm: ${{ steps.norm.outputs.install_helm }}
+      install_ingress: ${{ steps.norm.outputs.install_ingress }}
+      install_cert_manager: ${{ steps.norm.outputs.install_cert_manager }}
+      install_sealed_secrets: ${{ steps.norm.outputs.install_sealed_secrets }}
+    steps:
+      - id: norm
+        run: |
+          echo "Normalizando inputs..."
+
+          if [ "${{ inputs.install_all }}" = "true" ]; then
+            echo "install_k3s=true" >> "$GITHUB_OUTPUT"
+            echo "install_helm=true" >> "$GITHUB_OUTPUT"
+            echo "install_ingress=true" >> "$GITHUB_OUTPUT"
+            echo "install_cert_manager=true" >> "$GITHUB_OUTPUT"
+            echo "install_sealed_secrets=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "install_k3s=${{ inputs.install_k3s }}" >> "$GITHUB_OUTPUT"
+            echo "install_helm=${{ inputs.install_helm }}" >> "$GITHUB_OUTPUT"
+            echo "install_ingress=${{ inputs.install_ingress }}" >> "$GITHUB_OUTPUT"
+            echo "install_cert_manager=${{ inputs.install_cert_manager }}" >> "$GITHUB_OUTPUT"
+            echo "install_sealed_secrets=${{ inputs.install_sealed_secrets }}" >> "$GITHUB_OUTPUT"
+          fi
+
+# =========================================================
 # JOB 1 – K3s
-# =========================
+# =========================================================
   install-k3s:
+    name: Install K3s
+    needs: normalize-inputs
     runs-on: [self-hosted, linux]
     environment: lab
+    if: needs.normalize-inputs.outputs.install_k3s == 'true'
     steps:
       - uses: actions/checkout@v4
+
       - name: Install K3s
-        if: env.INSTALL_ALL == 'true' || inputs.install_k3s == 'true'
         run: |
           set -euo pipefail
           sudo bash infra/bootstrap/bootstrap_k3s.sh
+
       - name: Wait for K3s
-        if: env.INSTALL_ALL == 'true' || inputs.install_k3s == 'true'
         run: |
           export KUBECONFIG=/etc/rancher/k3s/k3s.yaml
           kubectl wait --for=condition=Ready node --all --timeout=300s
-# =========================
-# JOB 2 – Helm
-# =========================
+
+# =========================================================
+# JOB 2 – HELM
+# =========================================================
   install-helm:
+    name: Install Helm
     needs: install-k3s
     runs-on: [self-hosted, linux]
+    if: needs.normalize-inputs.outputs.install_helm == 'true'
     steps:
+      - uses: actions/checkout@v4
+
       - name: Install Helm
-        if: env.INSTALL_ALL == 'true' || inputs.install_helm == 'true'
         run: |
           set -euo pipefail
           sudo bash infra/bootstrap/bootstrap_helm.sh
-# =========================
-# JOB 3 – Core Addons
-# =========================
+
+# =========================================================
+# JOB 3 – CORE ADDONS
+# =========================================================
   install-addons:
+    name: Install Core Addons
     needs: install-helm
     runs-on: [self-hosted, linux]
     steps:
-      - name: Ingress
-        if: env.INSTALL_ALL == 'true' || inputs.install_ingress == 'true'
+      - name: Install Ingress
+        if: needs.normalize-inputs.outputs.install_ingress == 'true'
         run: sudo bash infra/bootstrap/bootstrap_ingress.sh
-      - name: Cert-Manager
-        if: env.INSTALL_ALL == 'true' || inputs.install_cert_manager == 'true'
+
+      - name: Install Cert-Manager
+        if: needs.normalize-inputs.outputs.install_cert_manager == 'true'
         run: sudo bash infra/bootstrap/bootstrap_certmanager.sh
-      - name: Sealed-Secrets
-        if: env.INSTALL_ALL == 'true' || inputs.install_sealed_secrets == 'true'
+
+      - name: Install Sealed-Secrets
+        if: needs.normalize-inputs.outputs.install_sealed_secrets == 'true'
         run: sudo bash infra/bootstrap/bootstrap_sealed_secrets.sh
