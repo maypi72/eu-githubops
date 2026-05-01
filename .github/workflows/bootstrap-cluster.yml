@@ -113,7 +113,9 @@ jobs:
 # =========================================================
   install-helm:
     name: Install Helm
-    needs: install-k3s
+    needs:
+      - install-k3s
+      - normalize-inputs
     runs-on: [self-hosted, linux]
     if: needs.normalize-inputs.outputs.install_helm == 'true'
     steps:
@@ -129,9 +131,13 @@ jobs:
 # =========================================================
   install-addons:
     name: Install Core Addons
-    needs: install-helm
+    needs:
+      - install-helm
+      - normalize-inputs
     runs-on: [self-hosted, linux]
     steps:
+      - uses: actions/checkout@v4
+
       - name: Install Ingress
         if: needs.normalize-inputs.outputs.install_ingress == 'true'
         run: sudo bash infra/bootstrap/bootstrap_ingress.sh
