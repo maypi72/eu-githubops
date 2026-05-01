@@ -1,637 +1,86 @@
-name: Bootstrap Cluster
 
+name: Bootstrap Cluster
 on:
   workflow_dispatch:
     inputs:
       install_all:
-        description: '⚡ Instalar TODO (K3s + Helm + Ingress + Cert-Manager + Sealed-Secrets)'
-        required: false
-        default: false
         type: boolean
+        default: false
       k3s_version:
-        description: 'Versión de k3s'
-        required: false
-        default: 'v1.34.4+k3s1'
         type: string
+        default: 'v1.34.4+k3s1'
       install_k3s:
-        description: '⚙️ Instalar K3s (requerido para otros componentes) - IGNORADO si install_all=true'
-        required: false
+        type: boolean
         default: true
-        type: boolean
       install_helm:
-        description: '⚙️ Instalar Helm (requiere k3s) - IGNORADO si install_all=true'
-        required: false
-        default: false
         type: boolean
+        default: false
       install_ingress:
-        description: '⚙️ Instalar Ingress (requiere k3s) - IGNORADO si install_all=true'
-        required: false
-        default: false
         type: boolean
+        default: false
       install_cert_manager:
-        description: '⚙️ Instalar Cert-Manager (requiere k3s) - IGNORADO si install_all=true'
-        required: false
-        default: false
         type: boolean
+        default: false
       install_sealed_secrets:
-        description: '⚙️ Instalar Sealed-Secrets (requiere k3s) - IGNORADO si install_all=true'
-        required: false
-        default: false
         type: boolean
+        default: false
       dry_run:
-        description: 'Ejecutar en modo dry-run (sin cambios)'
-        required: false
-        default: false
         type: boolean
-
+        default: false
 permissions:
   contents: read
   id-token: write
-  actions: write  
-
-
+concurrency:
+  group: bootstrap-cluster
+  cancel-in-progress: true
 env:
+  INSTALL_ALL: ${{ inputs.install_all == 'true' }}
+  DRY_RUN: ${{ inputs.dry_run == 'true' }}
   KUBECONFIG: $HOME/kubeconfig
-  RETRY_MAX: 5
-  RETRY_DELAY: 2
-  ARTIFACT_DIR: $HOME/bootstrap-artifacts
-  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
-
 jobs:
-  bootstrap:
-    name: Bootstrap Cluster
+# =========================
+# JOB 1 – K3s
+# =========================
+  install-k3s:
     runs-on: [self-hosted, linux]
-    timeout-minutes: 30  # Bootstrap de K3s, Helm e Ingress
-    environment: lab  # Requiere aprobación/protecciones configuradas en GitHub
-    
+    environment: lab
     steps:
-      - name: Checkout Repository
-        uses: actions/checkout@v4
-
-      - name: Normalize Inputs (Handle install_all)
-        id: normalize-inputs
+      - uses: actions/checkout@v4
+      - name: Install K3s
+        if: env.INSTALL_ALL == 'true' || inputs.install_k3s == 'true'
         run: |
-          echo "::group::Normalizando inputs"
-          
-          INSTALL_ALL="${{ inputs.install_all }}"
-          
-          if [ "$INSTALL_ALL" == "true" ]; then
-            echo "⚡⚡⚡ MODO INSTALACIÓN COMPLETA ACTIVADO ⚡⚡⚡"
-            echo ""
-            echo "Se instalarán TODOS los componentes:"
-            echo "  1. K3s"
-            echo "  2. Helm"
-            echo "  3. Ingress"
-            echo "  4. Cert-Manager"
-            echo "  5. Sealed-Secrets"
-            echo ""
-            echo "Las selecciones individuales están siendo IGNORADAS"
-            echo ""
-            echo "install_k3s=true" >> $GITHUB_OUTPUT
-            echo "install_helm=true" >> $GITHUB_OUTPUT
-            echo "install_ingress=true" >> $GITHUB_OUTPUT
-            echo "install_cert_manager=true" >> $GITHUB_OUTPUT
-            echo "install_sealed_secrets=true" >> $GITHUB_OUTPUT
-          else
-            echo "Modo selección individual activado"
-            echo ""
-            echo "Componentes seleccionados:"
-            [ "${{ inputs.install_k3s }}" == "true" ] && echo "  ✓ K3s" || echo "  ✗ K3s"
-            [ "${{ inputs.install_helm }}" == "true" ] && echo "  ✓ Helm" || echo "  ✗ Helm"
-            [ "${{ inputs.install_ingress }}" == "true" ] && echo "  ✓ Ingress" || echo "  ✗ Ingress"
-            [ "${{ inputs.install_cert_manager }}" == "true" ] && echo "  ✓ Cert-Manager" || echo "  ✗ Cert-Manager"
-            [ "${{ inputs.install_sealed_secrets }}" == "true" ] && echo "  ✓ Sealed-Secrets" || echo "  ✗ Sealed-Secrets"
-            echo ""
-            echo "install_k3s=${{ inputs.install_k3s }}" >> $GITHUB_OUTPUT
-            echo "install_helm=${{ inputs.install_helm }}" >> $GITHUB_OUTPUT
-            echo "install_ingress=${{ inputs.install_ingress }}" >> $GITHUB_OUTPUT
-            echo "install_cert_manager=${{ inputs.install_cert_manager }}" >> $GITHUB_OUTPUT
-            echo "install_sealed_secrets=${{ inputs.install_sealed_secrets }}" >> $GITHUB_OUTPUT
-          fi
-          
-          echo "::endgroup::"
-
-      - name: Detect Existing Installations
-        id: detect-existing
+          set -euo pipefail
+          sudo bash infra/bootstrap/bootstrap_k3s.sh
+      - name: Wait for K3s
+        if: env.INSTALL_ALL == 'true' || inputs.install_k3s == 'true'
         run: |
-          echo "::group::Detectando instalaciones existentes"
-          
-          # Detectar si K3s ya está instalado
-          if command -v k3s >/dev/null 2>&1; then
-            echo "✓ K3s detectado en el sistema"
-            echo "k3s_installed=true" >> $GITHUB_OUTPUT
-            k3s --version
-          else
-            echo "✗ K3s no detectado"
-            echo "k3s_installed=false" >> $GITHUB_OUTPUT
-          fi
-          
-          echo "::endgroup::"
-
-      - name: Validate and Prepare Bootstrap Scripts
+          export KUBECONFIG=/etc/rancher/k3s/k3s.yaml
+          kubectl wait --for=condition=Ready node --all --timeout=300s
+# =========================
+# JOB 2 – Helm
+# =========================
+  install-helm:
+    needs: install-k3s
+    runs-on: [self-hosted, linux]
+    steps:
+      - name: Install Helm
+        if: env.INSTALL_ALL == 'true' || inputs.install_helm == 'true'
         run: |
-          echo "::group::Validación y preparación de scripts"
-          echo "Verificando existencia y permisos de scripts seleccionados..."
-          echo ""
-          
-          # Determinar scripts a validar basado en selecciones
-          declare -a scripts_to_validate
-          
-          echo "Componentes seleccionados:"
-          [ "${{ steps.normalize-inputs.outputs.install_k3s }}" == "true" ] && echo "  ✓ K3s (será instalado)" && scripts_to_validate+=("infra/bootstrap/bootstrap_k3s.sh")
-          [ "${{ steps.normalize-inputs.outputs.install_helm }}" == "true" ] && echo "  ✓ Helm" && scripts_to_validate+=("infra/bootstrap/bootstrap_helm.sh")
-          [ "${{ steps.normalize-inputs.outputs.install_ingress }}" == "true" ] && echo "  ✓ Ingress" && scripts_to_validate+=("infra/bootstrap/bootstrap_ingress.sh")
-          [ "${{ steps.normalize-inputs.outputs.install_cert_manager }}" == "true" ] && echo "  ✓ Cert-Manager" && scripts_to_validate+=("infra/bootstrap/bootstrap_certmanager.sh")
-          [ "${{ steps.normalize-inputs.outputs.install_sealed_secrets }}" == "true" ] && echo "  ✓ Sealed-Secrets" && scripts_to_validate+=("infra/bootstrap/bootstrap_sealed_secrets.sh")
-          
-          if [ ${#scripts_to_validate[@]} -eq 0 ]; then
-            echo "  ⚠ No se seleccionó ningún componente"
-          fi
-          echo ""
-          
-          # Validar dependencias
-          echo "Validando dependencias..."
-          
-          # Determinar si otros componentes están seleccionados
-          OTHER_COMPONENTS_SELECTED=false
-          
-          if [ "${{ steps.normalize-inputs.outputs.install_helm }}" == "true" ] || [ "${{ steps.normalize-inputs.outputs.install_ingress }}" == "true" ] || [ "${{ steps.normalize-inputs.outputs.install_cert_manager }}" == "true" ] || [ "${{ steps.normalize-inputs.outputs.install_sealed_secrets }}" == "true" ]; then
-            OTHER_COMPONENTS_SELECTED=true
-          fi
-          
-          # Si se seleccionan otros componentes, verificar que K3s esté disponible
-          if [ "$OTHER_COMPONENTS_SELECTED" = "true" ]; then
-            # Verificar que K3s esté disponible (instalado o seleccionado para instalar)
-            if [ "${{ steps.detect-existing.outputs.k3s_installed }}" != "true" ] && [ "${{ steps.normalize-inputs.outputs.install_k3s }}" != "true" ]; then
-              echo "✗ ERROR: Helm, Ingress, Cert-Manager y Sealed-Secrets requieren que K3s esté instalado o seleccionado"
-              echo ""
-              echo "Opciones:"
-              echo "  1. Selecciona install_k3s=true para instalar K3s primero"
-              echo "  2. O instala K3s manualmente antes de ejecutar este workflow"
-              exit 1
-            fi
-            
-            if [ "${{ steps.detect-existing.outputs.k3s_installed }}" = "true" ]; then
-              echo "✓ K3s detectado en el sistema (será usado como base)"
-            else
-              echo "✓ K3s será instalado antes de los otros componentes"
-            fi
-          else
-            if [ "${{ steps.detect-existing.outputs.k3s_installed }}" = "true" ]; then
-              echo "✓ K3s ya está instalado"
-            fi
-          fi
-          
-          echo "✓ Dependencias validadas"
-          echo ""
-          
-          # Validar existencia y permisos de scripts
-          for file in "${scripts_to_validate[@]}"; do
-            if [ -f "$file" ]; then
-              echo "✓ $file encontrado"
-              
-              if [ -x "$file" ]; then
-                echo "  ✓ Permisos: ejecutable"
-              else
-                echo "  ⚠ Permisos: NO ejecutable, corrigiendo..."
-                chmod +x "$file"
-                echo "  ✓ Permisos: ejecutable (actualizado)"
-              fi
-            else
-              echo "✗ ERROR: $file no encontrado"
-              exit 1
-            fi
-          done
-          
-          echo ""
-          echo "ℹ️  Configuración del cluster:"
-          echo "  • CNI: Flannel (incluido en K3s por defecto)"
-          echo "  • Sin componentes innecesarios (traefik, servicelb deshabilitados)"
-          echo ""
-          echo "✓ Todos los scripts seleccionados validados y listos"
-          echo "::endgroup::"
-
-      - name: System Information
-        run: |
-          echo "::group::Información del sistema"
-          echo "SO: $(uname -s)"
-          echo "Kernel: $(uname -r)"
-          echo "Arquitectura: $(uname -m)"
-          echo "Memoria: $(free -h | grep Mem)"
-          echo "Disco disponible: $(df -h / | tail -1)"
-          echo "::endgroup::"
-
-      - name: Check Prerequisites
-        run: |
-          echo "::group::Verificación de herramientas"
-          
-          tools=("docker" "curl" "jq")
-          for tool in "${tools[@]}"; do
-            if command -v "$tool" >/dev/null 2>&1; then
-              version=$($tool --version 2>&1 | head -1)
-              echo "✓ $tool: $version"
-            else
-              echo "⚠ $tool no está instalado (podría ser necesario)"
-            fi
-          done
-          
-          echo "::endgroup::"
-
-      - name: Setup Bootstrap Environment
-        run: |
-          echo "::group::Configuración del entorno"
-          
-          export K3S_VERSION=${{ inputs.k3s_version }}
-          echo "K3S_VERSION=$K3S_VERSION" >> $GITHUB_ENV
-          
-          echo "Configuración de componentes:"
-          if [ "${{ inputs.install_all }}" == "true" ]; then
-            echo "  ⚡ MODO INSTALACIÓN COMPLETA ACTIVADO"
-            echo "  ✓ K3s: instalará (versión ${{ inputs.k3s_version }})"
-            echo "  ✓ Helm: instalará"
-            echo "  ✓ Ingress: instalará"
-            echo "  ✓ Cert-Manager: instalará"
-            echo "  ✓ Sealed-Secrets: instalará"
-          else
-            if [ "${{ steps.normalize-inputs.outputs.install_k3s }}" == "true" ]; then
-              echo "  K3s: instalará (versión ${{ inputs.k3s_version }})"
-            else
-              if [ "${{ steps.detect-existing.outputs.k3s_installed }}" == "true" ]; then
-                echo "  K3s: ya está instalado (no se reinstalará)"
-              else
-                echo "  K3s: no está instalado"
-              fi
-            fi
-            echo "  Helm: ${{ steps.normalize-inputs.outputs.install_helm }}"
-            echo "  Ingress: ${{ steps.normalize-inputs.outputs.install_ingress }}"
-            echo "  Cert-Manager: ${{ steps.normalize-inputs.outputs.install_cert_manager }}"
-            echo "  Sealed-Secrets: ${{ steps.normalize-inputs.outputs.install_sealed_secrets }}"
-          fi
-          echo ""
-          
-          echo "✓ KUBECONFIG configurado en: $KUBECONFIG"
-          echo "✓ Retry máximo: $RETRY_MAX"
-          echo "✓ Delay de retry: $RETRY_DELAY segundos"
-          
-          echo "::endgroup::"
-
-      - name: Execute Bootstrap
-        id: bootstrap
-        run: |
-          echo "::group::Ejecutando Bootstrap"
-          
-          if [ "${{ inputs.dry_run }}" == "true" ]; then
-            echo "⚠️  MODO DRY-RUN: Scripts no serán ejecutados"
-            echo "DRY_RUN=true" >> $GITHUB_ENV
-          else
-            echo "🚀 Iniciando bootstrap de componentes seleccionados..."
-            echo ""
-            echo "Configuración:"
-            echo "  • K3s Version: ${{ inputs.k3s_version }}"
-            echo "  • CNI: Flannel (sin Calico)"
-            echo "  • Timeout: 30 minutos"
-            echo ""
-            
-            overall_exit=0
-            K3S_INSTALLED="{{ steps.detect-existing.outputs.k3s_installed }}"
-            
-            # Ejecutar K3s si está seleccionado
-            if [ "${{ steps.normalize-inputs.outputs.install_k3s }}" == "true" ]; then
-              echo "────────────────────────────────────────"
-              echo "[1/5] Ejecutando bootstrap_k3s.sh..."
-              echo "────────────────────────────────────────"
-              if bash infra/bootstrap/bootstrap_k3s.sh; then
-                echo "✓ K3s bootstrap completado"
-              else
-                echo "✗ K3s bootstrap falló"
-                overall_exit=1
-              fi
-              echo ""
-            elif [ "$K3S_INSTALLED" = "true" ]; then
-              echo "────────────────────────────────────────"
-              echo "[1/5] K3s ya está instalado (saltando)"
-              echo "────────────────────────────────────────"
-              echo "✓ K3s detectado en el sistema"
-              echo ""
-            fi
-            
-            # Ejecutar Helm si está seleccionado
-            if [ "${{ steps.normalize-inputs.outputs.install_helm }}" == "true" ]; then
-              echo "────────────────────────────────────────"
-              echo "[2/5] Ejecutando bootstrap_helm.sh..."
-              echo "────────────────────────────────────────"
-              if bash infra/bootstrap/bootstrap_helm.sh; then
-                echo "✓ Helm bootstrap completado"
-              else
-                echo "✗ Helm bootstrap falló"
-                overall_exit=1
-              fi
-              echo ""
-            fi
-            
-            # Ejecutar Ingress si está seleccionado
-            if [ "${{ steps.normalize-inputs.outputs.install_ingress }}" == "true" ]; then
-              echo "────────────────────────────────────────"
-              echo "[3/5] Ejecutando bootstrap_ingress.sh..."
-              echo "────────────────────────────────────────"
-              if bash infra/bootstrap/bootstrap_ingress.sh; then
-                echo "✓ Ingress bootstrap completado"
-              else
-                echo "✗ Ingress bootstrap falló"
-                overall_exit=1
-              fi
-              echo ""
-            fi
-            
-            # Ejecutar Cert-Manager si está seleccionado
-            if [ "${{ steps.normalize-inputs.outputs.install_cert_manager }}" == "true" ]; then
-              echo "────────────────────────────────────────"
-              echo "[4/5] Ejecutando bootstrap_certmanager.sh..."
-              echo "────────────────────────────────────────"
-              if bash infra/bootstrap/bootstrap_certmanager.sh; then
-                echo "✓ Cert-Manager bootstrap completado"
-              else
-                echo "✗ Cert-Manager bootstrap falló"
-                overall_exit=1
-              fi
-              echo ""
-            fi
-            
-            # Ejecutar Sealed-Secrets si está seleccionado
-            if [ "${{ steps.normalize-inputs.outputs.install_sealed_secrets }}" == "true" ]; then
-              echo "────────────────────────────────────────"
-              echo "[5/5] Ejecutando bootstrap_sealed_secrets.sh..."
-              echo "────────────────────────────────────────"
-              if bash infra/bootstrap/bootstrap_sealed_secrets.sh; then
-                echo "✓ Sealed-Secrets bootstrap completado"
-              else
-                echo "✗ Sealed-Secrets bootstrap falló"
-                overall_exit=1
-              fi
-              echo ""
-            fi
-            
-            # Verificar resultado general
-            echo ""
-            if [ $overall_exit -eq 0 ]; then
-              echo "✓ Todos los bootstrap completados exitosamente"
-            else
-              echo "✗ Uno o más bootstraps fallaron"
-              exit $overall_exit
-            fi
-          fi
-          
-          echo "::endgroup::"
-
-      - name: Verify Bootstrap Installation
-        if: success() && env.DRY_RUN != 'true' && (steps.normalize-inputs.outputs.install_k3s == 'true' || steps.detect-existing.outputs.k3s_installed == 'true')
-        run: |
-          echo "::group::Verificación de instalaciones"
-          echo ""
-          
-          # Verificar k3s
-          if command -v k3s >/dev/null 2>&1; then
-            echo "✓ K3s instalado:"
-            k3s --version
-          fi
-          
-          # Verificar kubectl
-          if command -v kubectl >/dev/null 2>&1; then
-            echo ""
-            echo "✓ kubectl disponible:"
-            kubectl version --client --short || true
-            
-            echo ""
-            echo "Nodos del cluster:"
-            kubectl get nodes || true
-            
-            echo ""
-            echo "CNI Status:"
-            kubectl get pods -n kube-flannel -o wide || true
-          fi
-          
-          # Verificar Helm
-          if command -v helm >/dev/null 2>&1; then
-            echo ""
-            echo "✓ Helm instalado:"
-            helm version --short || true
-          fi
-          
-          echo "::endgroup::"
-
-      - name: Secure kubeconfig from k3s
-        if: success() && env.DRY_RUN != 'true' && (steps.normalize-inputs.outputs.install_k3s == 'true' || steps.detect-existing.outputs.k3s_installed == 'true')
-        run: |
-          echo "::group::Verificando kubeconfig de K3s"
-          
-          K3S_KUBECONFIG="/etc/rancher/k3s/k3s.yaml"
-          
-          if [ -f "$K3S_KUBECONFIG" ]; then
-            # Verificar que KUBECONFIG ya existe desde bootstrap_k3s.sh
-            if [ -f "$KUBECONFIG" ]; then
-              echo "✓ kubeconfig ya configurado en $KUBECONFIG"
-              echo "  Tamaño: $(du -h "$KUBECONFIG" | cut -f1)"
-              echo "  Permisos: $(stat -c '%a' "$KUBECONFIG")"
-            else
-              echo "⚠ kubeconfig no encontrado en $KUBECONFIG"
-              echo "  Copiando desde $K3S_KUBECONFIG..."
-              sudo cp "$K3S_KUBECONFIG" "$KUBECONFIG"
-              sudo chown $(id -u):$(id -g) "$KUBECONFIG"
-              chmod 600 "$KUBECONFIG"
-              echo "✓ kubeconfig copiado y asegurado"
-            fi
-          else
-            echo "⚠ k3s kubeconfig no encontrado en: $K3S_KUBECONFIG"
-            echo "  El cluster podría no estar completamente inicializado"
-          fi
-          
-          echo "::endgroup::"
-
-      - name: Prepare kubeconfig for Artifact
-        if: success() && (steps.normalize-inputs.outputs.install_k3s == 'true' || steps.detect-existing.outputs.k3s_installed == 'true')
-        run: |
-          echo "::group::Preparando kubeconfig para artifact"
-          
-          if [ -f "$KUBECONFIG" ]; then
-            # Crear directorio temporal para artefactos
-            mkdir -p "$ARTIFACT_DIR"
-            
-            # Copiar kubeconfig con permisos restrictivos
-            cp "$KUBECONFIG" "$ARTIFACT_DIR/kubeconfig"
-            chmod 600 "$ARTIFACT_DIR/kubeconfig"
-            
-            # Verificar que el archivo se copió correctamente
-            if [ -f "$ARTIFACT_DIR/kubeconfig" ]; then
-              echo "✓ kubeconfig preparado para artifact"
-              echo "Tamaño: $(du -h "$ARTIFACT_DIR/kubeconfig" | cut -f1)"
-              echo "Permisos: $(stat -c '%a' "$ARTIFACT_DIR/kubeconfig")"
-              echo ""
-              echo "⚠ IMPORTANTE: Revisa la retención de artifacts (actualmente 30 días)"
-              echo "⚠ El kubeconfig contiene credenciales - mantén el acceso restringido"
-            else
-              echo "✗ ERROR: No se pudo copiar kubeconfig"
-              exit 1
-            fi
-          else
-            echo "✗ ERROR: KUBECONFIG no encontrado en: $KUBECONFIG"
-            exit 1
-          fi
-          
-          echo "::endgroup::"
-
-      - name: Upload kubeconfig Artifact
-        if: success() && (steps.normalize-inputs.outputs.install_k3s == 'true' || steps.detect-existing.outputs.k3s_installed == 'true')
-        uses: actions/upload-artifact@v4
-        with:
-          name: kubeconfig
-          path: ${{ env.ARTIFACT_DIR }}/kubeconfig
-          retention-days: 30
-          if-no-files-found: error
-          compression-level: 9
-
-      - name: Create Bootstrap Report
-        if: always()
-        run: |
-          echo "::group::Reporte del Bootstrap"
-          
-          report_file="$ARTIFACT_DIR/bootstrap-report.txt"
-          mkdir -p "$(dirname "$report_file")"
-          
-          {
-            echo "Bootstrap Report"
-            echo "================"
-            echo "Timestamp: $(date -u '+%Y-%m-%d %H:%M:%S Z')"
-            echo "Workflow: ${{ github.workflow }}"
-            echo "Run ID: ${{ github.run_id }}"
-            echo "Run Number: ${{ github.run_number }}"
-            echo "Actor: ${{ github.actor }}"
-            echo ""
-            echo "Mode: $([ "${{ inputs.install_all }}" == 'true' ] && echo 'FULL INSTALLATION (install_all=true)' || echo 'SELECTIVE INSTALLATION')"
-            echo ""
-            echo "Inputs:"
-            echo "  Install All: ${{ inputs.install_all }}"
-            echo "  K3S Version: ${{ inputs.k3s_version }}"
-            echo "  Install K3s: ${{ steps.normalize-inputs.outputs.install_k3s }}"
-            echo "  Install Helm: ${{ steps.normalize-inputs.outputs.install_helm }}"
-            echo "  Install Ingress: ${{ steps.normalize-inputs.outputs.install_ingress }}"
-            echo "  Install Cert-Manager: ${{ steps.normalize-inputs.outputs.install_cert_manager }}"
-            echo "  Install Sealed-Secrets: ${{ steps.normalize-inputs.outputs.install_sealed_secrets }}"
-            echo "  Dry-run: ${{ inputs.dry_run }}"
-            echo ""
-            echo "System:"
-            echo "  OS: $(uname -s)"
-            echo "  Kernel: $(uname -r)"
-            echo ""
-            echo "Status: $([ "${{ job.status }}" == 'success' ] && echo '✓ SUCCESS' || echo '✗ FAILED')"
-          } > "$report_file"
-          
-          cat "$report_file"
-          echo "::endgroup::"
-
-      - name: Upload Bootstrap Report
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: bootstrap-report
-          path: ${{ env.ARTIFACT_DIR }}/bootstrap-report.txt
-          retention-days: 30
-          compression-level: 9
-
-      - name: Cleanup on Failure
-        if: failure()
-        run: |
-          echo "::group::Limpieza tras fallo"
-          echo "⚠ Bootstrap falló. Manteniendo kubeconfig para debugging."
-          echo "✓ Revisa los logs anteriores para detalles del error"
-          echo "::endgroup::"
-
-  # NOTA: Configuración de protecciones y timeouts
-  # 
-  # Para implementar aprobación manual en el job "bootstrap":
-  # 1. Ve a Settings → Environments → New environment → "lab"
-  # 2. Configura:
-  #    - Required reviewers: usuarios que deben aprobar antes de ejecutar
-  #    - Wait timer: minutos de espera antes de permitir ejecución
-  #    - Deployment branches: restringe a ramas específicas (ej: main, develop)
-  #    - Environment secrets: credenciales únicas para este environment
-  #
-  # Timeouts de bootstrap (manejados en los scripts):
-  # - bootstrap_k3s.sh: Espera hasta 5 minutos a que K3s + Flannel estén ready
-  # - bootstrap_helm.sh: Verifica instalación de Helm
-  # - bootstrap_ingress.sh: Verifica que el deployment del ingress existe
-  #
-  # CNI Utilizado: Flannel (incluido por defecto en K3s)
-  # - Simple y eficiente para clusters pequeños/medianos
-  # - CIDR de pods: 10.42.0.0/16
-  # - CIDR de servicios: 10.43.0.0/16
-
-      - name: Success Summary
-        if: success()
-        run: |
-          echo "::group::✅ BOOTSTRAP COMPLETADO EXITOSAMENTE"
-          echo ""
-          
-          if [ "${{ inputs.install_all }}" == "true" ]; then
-            echo "🔷 MODO: Instalación completa (install_all=true)"
-            echo ""
-            echo "📊 Componentes instalados:"
-            echo "  ✓ K3s (versión ${{ inputs.k3s_version }})"
-            echo "  ✓ Helm"
-            echo "  ✓ Ingress NGINX"
-            echo "  ✓ Cert-Manager"
-            echo "  ✓ Sealed-Secrets"
-          else
-            echo "🔷 MODO: Instalación selectiva"
-            echo ""
-            echo "📊 Estado de componentes:"
-            if [ "${{ steps.detect-existing.outputs.k3s_installed }}" == "true" ] && [ "${{ steps.normalize-inputs.outputs.install_k3s }}" != "true" ]; then
-              echo "  ✓ K3s (ya estaba instalado)"
-            elif [ "${{ steps.normalize-inputs.outputs.install_k3s }}" == "true" ]; then
-              echo "  ✓ K3s (versión ${{ inputs.k3s_version }}) [INSTALADO]"
-            elif [ "${{ steps.detect-existing.outputs.k3s_installed }}" == "true" ]; then
-              echo "  ✓ K3s (disponible en el sistema)"
-            else
-              echo "  ○ K3s (no instalado ni requerido)"
-            fi
-            [ "${{ steps.normalize-inputs.outputs.install_helm }}" == "true" ] && echo "  ✓ Helm [INSTALADO]" || echo "  ○ Helm (no seleccionado)"
-            [ "${{ steps.normalize-inputs.outputs.install_ingress }}" == "true" ] && echo "  ✓ Ingress NGINX [INSTALADO]" || echo "  ○ Ingress (no seleccionado)"
-            [ "${{ steps.normalize-inputs.outputs.install_cert_manager }}" == "true" ] && echo "  ✓ Cert-Manager [INSTALADO]" || echo "  ○ Cert-Manager (no seleccionado)"
-            [ "${{ steps.normalize-inputs.outputs.install_sealed_secrets }}" == "true" ] && echo "  ✓ Sealed-Secrets [INSTALADO]" || echo "  ○ Sealed-Secrets (no seleccionado)"
-          fi
-          
-          echo ""
-          
-          # Solo mostrar información de red si K3s está disponible
-          if [ "${{ steps.detect-existing.outputs.k3s_installed }}" == "true" ] || [ "${{ steps.normalize-inputs.outputs.install_k3s }}" == "true" ]; then
-            echo "📋 Configuración de red:"
-            echo "  • CNI: Flannel (red superpuesta simple y eficiente)"
-            echo "  • Pods CIDR: 10.42.0.0/16"
-            echo "  • Services CIDR: 10.43.0.0/16"
-            echo ""
-            echo "📄 kubeconfig disponible:"
-            echo "  • Ubicación: $KUBECONFIG"
-            echo "  • Descárgalo desde: Artifacts (kubeconfig)"
-            echo "  • Retención: 30 días"
-            echo ""
-            echo "🔑 IMPORTANTE - Seguridad:"
-            echo "  • El kubeconfig contiene credenciales"
-            echo "  • Mantenlo privado y restringido"
-            echo "  • No lo subas a repositorios públicos"
-          fi
-          
-          echo ""
-          echo "🚀 Próximos pasos:"
-          echo "  1. Descarga el kubeconfig de artifacts"
-          echo "  2. Configura: export KUBECONFIG=<ruta-a-kubeconfig>"
-          echo "  3. Verifica: kubectl get nodes"
-          
-          if [ "${{ steps.normalize-inputs.outputs.install_helm }}" == "true" ] || [ "${{ inputs.install_all }}" == "true" ]; then
-            echo "  4. Instala aplicaciones: helm install <repo>/<chart>"
-          fi
-          
-          if [ "${{ steps.normalize-inputs.outputs.install_sealed_secrets }}" == "true" ] || [ "${{ inputs.install_all }}" == "true" ]; then
-            echo "  5. Configura secretos: kubeseal -f secret.yaml -w sealed-secret.yaml"
-          fi
-          
-          echo ""
-          echo "::endgroup::"
+          set -euo pipefail
+          sudo bash infra/bootstrap/bootstrap_helm.sh
+# =========================
+# JOB 3 – Core Addons
+# =========================
+  install-addons:
+    needs: install-helm
+    runs-on: [self-hosted, linux]
+    steps:
+      - name: Ingress
+        if: env.INSTALL_ALL == 'true' || inputs.install_ingress == 'true'
+        run: sudo bash infra/bootstrap/bootstrap_ingress.sh
+      - name: Cert-Manager
+        if: env.INSTALL_ALL == 'true' || inputs.install_cert_manager == 'true'
+        run: sudo bash infra/bootstrap/bootstrap_certmanager.sh
+      - name: Sealed-Secrets
+        if: env.INSTALL_ALL == 'true' || inputs.install_sealed_secrets == 'true'
+        run: sudo bash infra/bootstrap/bootstrap_sealed_secrets.sh
