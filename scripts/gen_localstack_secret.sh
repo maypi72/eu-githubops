@@ -24,6 +24,10 @@
 set -euo pipefail
 IFS=$'\n\t'
 
+# ============================================================
+# GENERATE LOCALSTACK SECRET - Crea secreto sellado para LocalStack
+# ============================================================
+
 # Configuración de rutas y valores
 NAMESPACE="localstack"
 SECRET_NAME="localstack-credentials"
@@ -33,11 +37,59 @@ CERT_PATH="infra/sealed-secrets/pub-cert.pem"
 # Detectar si se ejecuta desde GitHub Actions
 CI_ENVIRONMENT="${CI:-false}"
 SKIP_GIT_PUSH="${SKIP_GIT_PUSH:-${CI_ENVIRONMENT}}"
-
-# Variable para forzar la actualización del certificado público si es necesario
 FETCH_CERT="${FETCH_CERT:-false}"
 
+# Colores
+GREEN='\033[0;32m'
+YELLOW='\033[1;33m'
+RED='\033[0;31m'
+NC='\033[0m'
+
+# Función de reintentos
+retry() {
+  local -r max=${RETRY_MAX:-5}
+  local -r delay=${RETRY_DELAY:-2}
+  local i=0
+  until "$@"; do
+    i=$((i+1))
+    if [ $i -ge $max ]; then
+      echo -e "${RED}✗ Comando falló después de $i intentos: $*${NC}"
+      return 1
+    fi
+    echo -e "${YELLOW}🔄 Reintentando ($i/$max): $*${NC}"
+    sleep $((delay * i))
+  done
+}
+
 echo "::group::Verificando configuración"
+
+# Detectar y validar KUBECONFIG
+echo "[i] Buscando KUBECONFIG..."
+KUBECONFIG_PATHS=(
+  "${RUNNER_TEMP}/kubeconfig-artifact/kubeconfig"  # Desde artefacto de Actions
+  "/etc/rancher/k3s/k3s.yaml"                       # k3s instalado
+  "${HOME}/kubeconfig"                              # Ubicación estándar
+  "${HOME}/.kube/config"                            # Ubicación por defecto
+)
+
+KUBECONFIG_FOUND=false
+for kb_path in "${KUBECONFIG_PATHS[@]}"; do
+  if [ -f "$kb_path" ]; then
+    export KUBECONFIG="$kb_path"
+    echo -e "${GREEN}✓ KUBECONFIG encontrado: $KUBECONFIG${NC}"
+    KUBECONFIG_FOUND=true
+    break
+  fi
+done
+
+if [ "$KUBECONFIG_FOUND" = false ]; then
+  echo -e "${RED}✗ ERROR: No se encontró KUBECONFIG${NC}"
+  echo "Se buscó en:"
+  for kb_path in "${KUBECONFIG_PATHS[@]}"; do
+    echo "  - $kb_path"
+  done
+  exit 1
+fi
 
 # Crear directorio si no existe
 mkdir -p "$(dirname "$CERT_PATH")"
@@ -286,69 +338,97 @@ else
 fi
 echo "::endgroup::"
 
+echo "::group::Validando conectividad al cluster"
+if ! retry kubectl cluster-info >/dev/null 2>&1; then
+  echo -e "${RED}✗ ERROR: No se puede conectar al cluster${NC}"
+  echo ""
+  echo "Verifica:"
+  echo "1. Que K3s está corriendo: sudo systemctl status k3s"
+  echo "2. Que KUBECONFIG es correcto: echo \$KUBECONFIG"
+  echo "3. Que tienes acceso de lectura: ls -la \$KUBECONFIG"
+  exit 1
+fi
+echo -e "${GREEN}✓ Cluster Kubernetes accesible${NC}"
+echo "::endgroup::"
+
 echo "::group::Comprobando directorio de salida"
 if [ ! -d "${OUT_DIR}" ]; then
   mkdir -p "${OUT_DIR}"
-  echo "✓ Directorio creado: ${OUT_DIR}"
+  echo -e "${GREEN}✓ Directorio creado: ${OUT_DIR}${NC}"
 else
-  echo "✓ Directorio ya existe: ${OUT_DIR}"
+  echo -e "${GREEN}✓ Directorio ya existe: ${OUT_DIR}${NC}"
 fi
 echo "::endgroup::"
 
 echo "::group::Validando variables de entorno"
 if [ -z "${AWS_ACCESS_KEY_ID:-}" ]; then
-  echo "ERROR: Debes exportar AWS_ACCESS_KEY_ID"
-  echo "Variables recibidas:"
-  echo "  AWS_ACCESS_KEY_ID: ${AWS_ACCESS_KEY_ID:-[vacío]}"
-  echo "  AWS_SECRET_ACCESS_KEY: ${AWS_SECRET_ACCESS_KEY:-[vacío]}"
-  echo "  CI: ${CI:-[no set]}"
+  echo -e "${RED}✗ ERROR: Variable de entorno AWS_ACCESS_KEY_ID no configurada${NC}"
   echo ""
-  echo "Uso: AWS_ACCESS_KEY_ID='tu-key' AWS_SECRET_ACCESS_KEY='tu-secret' $0"
+  echo "Solución: Exporta las variables antes de ejecutar este script:"
+  echo "  export AWS_ACCESS_KEY_ID='tu-access-key'"
+  echo "  export AWS_SECRET_ACCESS_KEY='tu-secret-key'"
+  echo ""
+  echo "O pásalas como variables de entorno:"
+  echo "  AWS_ACCESS_KEY_ID='...' AWS_SECRET_ACCESS_KEY='...' $0"
   exit 1
 fi
 if [ -z "${AWS_SECRET_ACCESS_KEY:-}" ]; then
-  echo "ERROR: Debes exportar AWS_SECRET_ACCESS_KEY"
-  echo "Variables recibidas:"
-  echo "  AWS_ACCESS_KEY_ID: ${AWS_ACCESS_KEY_ID:-[vacío]}"
-  echo "  AWS_SECRET_ACCESS_KEY: ${AWS_SECRET_ACCESS_KEY:-[vacío]}"
-  echo "  CI: ${CI:-[no set]}"
+  echo -e "${RED}✗ ERROR: Variable de entorno AWS_SECRET_ACCESS_KEY no configurada${NC}"
   echo ""
-  echo "Uso: AWS_ACCESS_KEY_ID='tu-key' AWS_SECRET_ACCESS_KEY='tu-secret' $0"
+  echo "Solución: Exporta las variables antes de ejecutar este script:"
+  echo "  export AWS_ACCESS_KEY_ID='tu-access-key'"
+  echo "  export AWS_SECRET_ACCESS_KEY='tu-secret-key'"
+  echo ""
+  echo "O pásalas como variables de entorno:"
+  echo "  AWS_ACCESS_KEY_ID='...' AWS_SECRET_ACCESS_KEY='...' $0"
   exit 1
 fi
-echo "✓ AWS_ACCESS_KEY_ID configurada"
-echo "✓ AWS_SECRET_ACCESS_KEY configurada"
+echo -e "${GREEN}✓ AWS_ACCESS_KEY_ID configurada${NC}"
+echo -e "${GREEN}✓ AWS_SECRET_ACCESS_KEY configurada${NC}"
 echo "::endgroup::"
 
 echo "::group::Verificando dependencias"
 
-# Verificar yq (para manipulación YAML)
+# Instalar yq si falta
 if ! command -v yq &> /dev/null; then
-  echo "[!] yq no encontrado. Instalando..."
+  echo -e "${YELLOW}[!] yq no encontrado. Instalando...${NC}"
   if ! sudo curl -fsSL https://github.com/mikefarah/yq/releases/latest/download/yq_linux_amd64 -o /usr/local/bin/yq; then
-    echo "ERROR: No se pudo descargar yq"
+    echo -e "${RED}✗ ERROR: No se pudo descargar yq${NC}"
     exit 1
   fi
-  sudo chmod +x /usr/local/bin/yq
+  if ! sudo chmod +x /usr/local/bin/yq; then
+    echo -e "${RED}✗ ERROR: No se pudo hacer ejecutable yq${NC}"
+    exit 1
+  fi
 fi
-echo "✓ yq disponible"
+echo -e "${GREEN}✓ yq disponible${NC}"
 
-# Verificar kubeseal
+# Instalar kubeseal si falta
 if ! command -v kubeseal &> /dev/null; then
-  echo "[!] kubeseal no encontrado. Instalando..."
+  echo -e "${YELLOW}[!] kubeseal no encontrado. Instalando...${NC}"
   KUBESEAL_TMP=$(mktemp -d)
   trap "rm -rf $KUBESEAL_TMP" EXIT
-  if ! wget -qO - https://github.com/bitnami-labs/sealed-secrets/releases/download/v0.24.0/kubeseal-0.24.0-linux-amd64.tar.gz | tar xfz - -C "$KUBESEAL_TMP"; then
-    echo "ERROR: No se pudo descargar e instalar kubeseal"
+  
+  # Intentar con wget primero
+  if ! wget -qO - https://github.com/bitnami-labs/sealed-secrets/releases/download/v0.24.0/kubeseal-0.24.0-linux-amd64.tar.gz 2>/dev/null | tar xfz - -C "$KUBESEAL_TMP"; then
+    # Fallback a curl si wget falla
+    if ! curl -fsSL https://github.com/bitnami-labs/sealed-secrets/releases/download/v0.24.0/kubeseal-0.24.0-linux-amd64.tar.gz 2>/dev/null | tar xfz - -C "$KUBESEAL_TMP"; then
+      echo -e "${RED}✗ ERROR: No se pudo descargar kubeseal (wget y curl fallaron)${NC}"
+      exit 1
+    fi
+  fi
+  
+  if ! sudo mv "$KUBESEAL_TMP/kubeseal" /usr/local/bin/; then
+    echo -e "${RED}✗ ERROR: No se pudo mover kubeseal a /usr/local/bin${NC}"
     exit 1
   fi
-  if ! sudo mv "$KUBESEAL_TMP/kubeseal" /usr/local/bin/ || ! sudo chmod +x /usr/local/bin/kubeseal; then
-    echo "ERROR: No se pudo mover kubeseal a /usr/local/bin"
+  
+  if ! sudo chmod +x /usr/local/bin/kubeseal; then
+    echo -e "${RED}✗ ERROR: No se pudo hacer ejecutable kubeseal${NC}"
     exit 1
   fi
 fi
-echo "✓ kubeseal disponible"
-
+echo -e "${GREEN}✓ kubeseal disponible${NC}"
 echo "::endgroup::"
 
 echo "::group::Creando Secret local"

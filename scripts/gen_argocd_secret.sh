@@ -1,17 +1,81 @@
 #!/usr/bin/env bash
 set -euo pipefail
 IFS=$'\n\t'
+
+# ============================================================
+# GENERATE ARGOCD SECRET - Crea secreto sellado para ArgoCD
+# ============================================================
+
+# Config
 NAMESPACE="argocd"
 SECRET_NAME="argocd-secret"
 OUT_DIR="infra/argocd/sealed-secrets"
 CERT_PATH="infra/sealed-secrets/pub-cert.pem"
+
 # Detectar si se ejecuta desde GitHub Actions
-# Si la variable CI está definida, no hacemos git push automático
 CI_ENVIRONMENT="${CI:-false}"
 SKIP_GIT_PUSH="${SKIP_GIT_PUSH:-${CI_ENVIRONMENT}}"
-# Nueva variable para forzar la actualización del certificado público si es necesario
 FETCH_CERT="${FETCH_CERT:-false}"
+
+# Colores
+GREEN='\033[0;32m'
+YELLOW='\033[1;33m'
+RED='\033[0;31m'
+NC='\033[0m'
+
+# Función de reintentos
+retry() {
+  local -r max=${RETRY_MAX:-5}
+  local -r delay=${RETRY_DELAY:-2}
+  local i=0
+  until "$@"; do
+    i=$((i+1))
+    if [ $i -ge $max ]; then
+      echo -e "${RED}✗ Comando falló después de $i intentos: $*${NC}"
+      return 1
+    fi
+    echo -e "${YELLOW}🔄 Reintentando ($i/$max): $*${NC}"
+    sleep $((delay * i))
+  done
+}
+# ============================================================
+# VALIDACIÓN INICIAL
+# ============================================================
+
 echo "::group::Verificando configuración"
+
+# Detectar y validar KUBECONFIG
+echo "[i] Buscando KUBECONFIG..."
+KUBECONFIG_PATHS=(
+  "${RUNNER_TEMP}/kubeconfig-artifact/kubeconfig"  # Desde artefacto de Actions
+  "/etc/rancher/k3s/k3s.yaml"                       # k3s instalado
+  "${HOME}/kubeconfig"                              # Ubicación estándar
+  "${HOME}/.kube/config"                            # Ubicación por defecto
+)
+
+KUBECONFIG_FOUND=false
+for kb_path in "${KUBECONFIG_PATHS[@]}"; do
+  if [ -f "$kb_path" ]; then
+    export KUBECONFIG="$kb_path"
+    echo -e "${GREEN}✓ KUBECONFIG encontrado: $KUBECONFIG${NC}"
+    KUBECONFIG_FOUND=true
+    break
+  fi
+done
+
+if [ "$KUBECONFIG_FOUND" = false ]; then
+  echo -e "${RED}✗ ERROR: No se encontró KUBECONFIG${NC}"
+  echo "Se buscó en:"
+  for kb_path in "${KUBECONFIG_PATHS[@]}"; do
+    echo "  - $kb_path"
+  done
+  echo ""
+  echo "Solución:"
+  echo "1. Ejecutar bootstrap_k3s.sh para instalar K3s"
+  echo "2. O exportar manualmente: export KUBECONFIG=/ruta/al/kubeconfig"
+  exit 1
+fi
+
 # Crear directorio si no existe
 mkdir -p "$(dirname "$CERT_PATH")"
 # IMPORTANTE: Limpiar certificado inválido si existe
@@ -265,56 +329,108 @@ echo "::endgroup::"
 echo "::group::Comprobando directorio de salida"
 if [ ! -d "${OUT_DIR}" ]; then
   mkdir -p "${OUT_DIR}"
-  echo "✓ Directorio creado: ${OUT_DIR}"
+  echo -e "${GREEN}✓ Directorio creado: ${OUT_DIR}${NC}"
 else
-  echo "✓ Directorio ya existe: ${OUT_DIR}"
+  echo -e "${GREEN}✓ Directorio ya existe: ${OUT_DIR}${NC}"
 fi
 echo "::endgroup::"
-echo "::group::Validando variables de entorno"
-if [ -z "${ARGOCD_ADMIN_PASSWORD:-}" ]; then
-  echo "ERROR: Debes exportar ARGOCD_ADMIN_PASSWORD"
+
+echo "::group::Validando conectividad al cluster"
+if ! retry kubectl cluster-info >/dev/null 2>&1; then
+  echo -e "${RED}✗ ERROR: No se puede conectar al cluster${NC}"
+  echo ""
+  echo "Verifica:"
+  echo "1. Que K3s está corriendo: sudo systemctl status k3s"
+  echo "2. Que KUBECONFIG es correcto: echo \$KUBECONFIG"
+  echo "3. Que tienes acceso de lectura: ls -la \$KUBECONFIG"
   exit 1
 fi
-echo "✓ ARGOCD_ADMIN_PASSWORD configurada"
+echo -e "${GREEN}✓ Cluster Kubernetes accesible${NC}"
+echo "::endgroup::"
+
+echo "::group::Validando variables de entorno"
+if [ -z "${ARGOCD_ADMIN_PASSWORD:-}" ]; then
+  echo -e "${RED}✗ ERROR: Variable de entorno ARGOCD_ADMIN_PASSWORD no configurada${NC}"
+  echo ""
+  echo "Solución: Exporta la variable antes de ejecutar este script:"
+  echo "  export ARGOCD_ADMIN_PASSWORD='tu-contraseña-segura'"
+  echo ""
+  echo "O pásala como variable de entorno:"
+  echo "  ARGOCD_ADMIN_PASSWORD='tu-contraseña-segura' $0"
+  exit 1
+fi
+echo -e "${GREEN}✓ ARGOCD_ADMIN_PASSWORD configurada${NC}"
 echo "::endgroup::"
 echo "::group::Verificando dependencias"
+
+# Instalar htpasswd si falta
 if ! command -v htpasswd &> /dev/null; then
-  echo "[!] htpasswd no encontrado. Instalando..."
-  sudo apt-get update && sudo apt-get install -y apache2-utils
-fi
-echo "✓ htpasswd disponible"
-if ! command -v yq &> /dev/null; then
-  echo "[!] yq no encontrado. Instalando..."
-  if ! sudo curl -fsSL https://github.com/mikefarah/yq/releases/latest/download/yq_linux_amd64 -o /usr/local/bin/yq; then
-    echo "ERROR: No se pudo descargar yq"
+  echo -e "${YELLOW}[!] htpasswd no encontrado. Instalando...${NC}"
+  if ! sudo apt-get update && sudo apt-get install -y apache2-utils; then
+    echo -e "${RED}✗ ERROR: No se pudo instalar apache2-utils${NC}"
     exit 1
   fi
-  sudo chmod +x /usr/local/bin/yq
 fi
-echo "✓ yq disponible"
+echo -e "${GREEN}✓ htpasswd disponible${NC}"
+
+# Instalar yq si falta
+if ! command -v yq &> /dev/null; then
+  echo -e "${YELLOW}[!] yq no encontrado. Instalando...${NC}"
+  if ! sudo curl -fsSL https://github.com/mikefarah/yq/releases/latest/download/yq_linux_amd64 -o /usr/local/bin/yq; then
+    echo -e "${RED}✗ ERROR: No se pudo descargar yq${NC}"
+    exit 1
+  fi
+  if ! sudo chmod +x /usr/local/bin/yq; then
+    echo -e "${RED}✗ ERROR: No se pudo hacer ejecutable yq${NC}"
+    exit 1
+  fi
+fi
+echo -e "${GREEN}✓ yq disponible${NC}"
+
+# Instalar jq si falta
 if ! command -v jq &> /dev/null; then
-  echo "[!] jq no encontrado. Instalando..."
-  sudo apt-get update && sudo apt-get install -y jq
+  echo -e "${YELLOW}[!] jq no encontrado. Instalando...${NC}"
+  if ! sudo apt-get update && sudo apt-get install -y jq; then
+    echo -e "${RED}✗ ERROR: No se pudo instalar jq${NC}"
+    exit 1
+  fi
 fi
-echo "✓ jq disponible"
+echo -e "${GREEN}✓ jq disponible${NC}"
+
+# Instalar kubeseal si falta
 if ! command -v kubeseal &> /dev/null; then
-  echo "[!] kubeseal no encontrado. Instalando..."
+  echo -e "${YELLOW}[!] kubeseal no encontrado. Instalando...${NC}"
   KUBESEAL_TMP=$(mktemp -d)
   trap "rm -rf $KUBESEAL_TMP" EXIT
-  if ! wget -qO - https://github.com/bitnami-labs/sealed-secrets/releases/download/v0.24.0/kubeseal-0.24.0-linux-amd64.tar.gz | tar xfz - -C "$KUBESEAL_TMP"; then
-    echo "ERROR: No se pudo descargar e instalar kubeseal"
+  
+  # Intentar con wget primero
+  if ! wget -qO - https://github.com/bitnami-labs/sealed-secrets/releases/download/v0.24.0/kubeseal-0.24.0-linux-amd64.tar.gz 2>/dev/null | tar xfz - -C "$KUBESEAL_TMP"; then
+    # Fallback a curl si wget falla
+    if ! curl -fsSL https://github.com/bitnami-labs/sealed-secrets/releases/download/v0.24.0/kubeseal-0.24.0-linux-amd64.tar.gz 2>/dev/null | tar xfz - -C "$KUBESEAL_TMP"; then
+      echo -e "${RED}✗ ERROR: No se pudo descargar kubeseal (wget y curl fallaron)${NC}"
+      exit 1
+    fi
+  fi
+  
+  if ! sudo mv "$KUBESEAL_TMP/kubeseal" /usr/local/bin/; then
+    echo -e "${RED}✗ ERROR: No se pudo mover kubeseal a /usr/local/bin${NC}"
     exit 1
   fi
-  if ! sudo mv "$KUBESEAL_TMP/kubeseal" /usr/local/bin/ || ! sudo chmod +x /usr/local/bin/kubeseal; then
-    echo "ERROR: No se pudo mover kubeseal a /usr/local/bin"
+  
+  if ! sudo chmod +x /usr/local/bin/kubeseal; then
+    echo -e "${RED}✗ ERROR: No se pudo hacer ejecutable kubeseal${NC}"
     exit 1
   fi
 fi
-echo "✓ kubeseal disponible"
+echo -e "${GREEN}✓ kubeseal disponible${NC}"
 echo "::endgroup::"
 echo "::group::Generando hash bcrypt"
 htpasswd=$(htpasswd -bnBC 10 "" "$ARGOCD_ADMIN_PASSWORD" | tr -d ':\n')
-echo "✓ Hash bcrypt generado"
+if [ -z "$htpasswd" ]; then
+  echo -e "${RED}✗ ERROR: No se pudo generar hash bcrypt${NC}"
+  exit 1
+fi
+echo -e "${GREEN}✓ Hash bcrypt generado${NC}"
 echo "::endgroup::"
 echo "::group::Creando Secret local (con merge de campos existentes)"
 # Generar una clave de servidor aleatoria
@@ -430,7 +546,7 @@ if ! kubeseal \
   < "${OUT_DIR}/${SECRET_NAME}.raw.yaml" \
   > "${OUT_DIR}/${SECRET_NAME}.yaml" 2>/tmp/kubeseal.err; then
   
-  echo "[✗] ERROR: kubeseal falló al sellar el secreto"
+  echo -e "${RED}✗ ERROR: kubeseal falló al sellar el secreto${NC}"
   echo ""
   echo "Detalles del error:"
   cat /tmp/kubeseal.err
@@ -444,19 +560,19 @@ fi
 rm -f /tmp/kubeseal.err
 # Validar que el archivo sellado se generó y tiene contenido
 if [ ! -s "${OUT_DIR}/${SECRET_NAME}.yaml" ]; then
-  echo "[✗] ERROR: El archivo sellado está vacío o no fue creado"
+  echo -e "${RED}✗ ERROR: El archivo sellado está vacío o no fue creado${NC}"
   exit 1
 fi
 # Validar que es YAML válido
 if ! yq eval '.' "${OUT_DIR}/${SECRET_NAME}.yaml" > /dev/null 2>&1; then
-  echo "[✗] ERROR: El archivo sellado no es YAML válido"
+  echo -e "${RED}✗ ERROR: El archivo sellado no es YAML válido${NC}"
   echo "Contenido:"
   cat "${OUT_DIR}/${SECRET_NAME}.yaml"
   exit 1
 fi
 # Validar estructura de SealedSecret
 if ! yq eval '.kind' "${OUT_DIR}/${SECRET_NAME}.yaml" 2>/dev/null | grep -q "SealedSecret"; then
-  echo "[✗] ERROR: El archivo no contiene un SealedSecret válido"
+  echo -e "${RED}✗ ERROR: El archivo no contiene un SealedSecret válido${NC}"
   echo "Kind encontrado:"
   yq eval '.kind' "${OUT_DIR}/${SECRET_NAME}.yaml" || echo "No hay kind definido"
   echo ""
@@ -464,17 +580,18 @@ if ! yq eval '.kind' "${OUT_DIR}/${SECRET_NAME}.yaml" 2>/dev/null | grep -q "Sea
   cat "${OUT_DIR}/${SECRET_NAME}.yaml"
   exit 1
 fi
-echo "[✓] SealedSecret válido generado"
-echo "✓ Secret sellado en ${OUT_DIR}/${SECRET_NAME}.yaml"
+echo -e "${GREEN}✓ SealedSecret válido generado${NC}"
+echo -e "${GREEN}✓ Secret sellado en ${OUT_DIR}/${SECRET_NAME}.yaml${NC}"
 echo "::endgroup::"
+echo ""
 echo "::group::Limpieza"
 rm -f "${OUT_DIR}/${SECRET_NAME}.raw.yaml"
-echo "✓ Archivo raw eliminado"
+echo -e "${GREEN}✓ Archivo raw eliminado${NC}"
 echo "::endgroup::"
 echo "::group::Git operations"
 # Preparar git (en caso de que no esté configurado)
 if [ "$CI_ENVIRONMENT" = "true" ]; then
-  echo "[i] Ambiente CI detectado (GitHub Actions)"
+  echo -e "${GREEN}[i] Ambiente CI detectado (GitHub Actions)${NC}"
   # Configurar git en CI
   git config user.name "github-actions[bot]" 2>/dev/null || true
   git config user.email "github-actions[bot]@users.noreply.github.com" 2>/dev/null || true
@@ -484,7 +601,7 @@ git add "${OUT_DIR}/${SECRET_NAME}.yaml"
 # IMPORTANTE: Siempre agregar el certificado si existe
 # (ya sea descargado del cluster o generado temporalmente)
 if [ -f "$CERT_PATH" ]; then
-  echo "[i] Certificado detectado - incluyendo en commit"
+  echo -e "${GREEN}[i] Certificado detectado - incluyendo en commit${NC}"
   git add "$CERT_PATH"
   CERT_INCLUDED="true"
 else
@@ -492,7 +609,7 @@ else
 fi
 # Crear commit si hay cambios
 if git diff --cached --quiet; then
-  echo "[!] Sin cambios para hacer commit"
+  echo -e "${YELLOW}[!] Sin cambios para hacer commit${NC}"
 else
   # Determinar mensaje del commit
   if [ "$CERT_INCLUDED" = "true" ] && [ "$FETCH_CERT" = "true" ]; then
@@ -506,35 +623,35 @@ else
   git commit -m "$COMMIT_MSG"
   
   if [ "$SKIP_GIT_PUSH" = "true" ]; then
-    echo "[i] Push skipped (ejecutándose en CI environment)"
+    echo -e "${GREEN}[i] Push skipped (ejecutándose en CI environment)${NC}"
     echo "    El workflow de GitHub Actions hará el push después"
   else
     git push origin $(git rev-parse --abbrev-ref HEAD)
-    echo "✓ Commit y push realizados"
+    echo -e "${GREEN}✓ Commit y push realizados${NC}"
   fi
 fi
 echo "::endgroup::"
 echo ""
 echo "════════════════════════════════════════════════"
-echo "[✓] Secreto sellado generado correctamente"
+echo -e "${GREEN}[✓] Secreto sellado generado correctamente${NC}"
 echo ""
 echo "Archivos actualizados:"
 echo "  📄 infra/argocd/sealed-secrets/argocd-secret.yaml"
 if [ "$CERT_INCLUDED" = "true" ]; then
   if [ "$FETCH_CERT" = "true" ]; then
-    echo "  📄 $CERT_PATH (✓ Descargado del cluster)"
+    echo -e "  📄 $CERT_PATH ${GREEN}(✓ Descargado del cluster)${NC}"
   else
-    echo "  📄 $CERT_PATH (⚠️  Temporal - regenerar con FETCH_CERT=true)"
+    echo -e "  📄 $CERT_PATH ${YELLOW}(⚠️  Temporal - regenerar con FETCH_CERT=true)${NC}"
   fi
 fi
 echo ""
 echo "🚀 Próximos pasos:"
 if [ "$FETCH_CERT" != "true" ] && [ "$CERT_INCLUDED" = "true" ]; then
-  echo "  • ⚠️  Se usó certificado temporal (no es del cluster real)"
+  echo -e "  • ${YELLOW}⚠️  Se usó certificado temporal (no es del cluster real)${NC}"
   echo "  • Después de instalar sealed-secrets en el cluster:"
   echo "    $ FETCH_CERT=true $0"
-  echo "  • Esto reemplazará el certificado con el del cluster real"
+else
+  echo "  • Secreto listo para ser aplicado al cluster"
+  echo "  • En CI: bootstrap-argocd.sh hará la instalación automáticamente"
 fi
-echo "  • Secreto listo para ser aplicado al cluster"
-echo "  • En CI: bootstrap-argocd.yaml hará push automáticamente"
 echo "════════════════════════════════════════════════"

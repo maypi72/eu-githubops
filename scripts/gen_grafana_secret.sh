@@ -24,6 +24,10 @@
 set -euo pipefail
 IFS=$'\n\t'
 
+# ============================================================
+# GENERATE GRAFANA SECRET - Crea secreto sellado para Grafana
+# ============================================================
+
 # Configuración de rutas y valores
 NAMESPACE="monitoring"
 SECRET_NAME="grafana-admin"
@@ -31,14 +35,61 @@ OUT_DIR="infra/grafana/sealed-secrets"
 CERT_PATH="infra/sealed-secrets/pub-cert.pem"
 
 # Detectar si se ejecuta desde GitHub Actions
-# Si la variable CI está definida, no hacemos git push automático
 CI_ENVIRONMENT="${CI:-false}"
 SKIP_GIT_PUSH="${SKIP_GIT_PUSH:-${CI_ENVIRONMENT}}"
-
-# Variable para forzar la actualización del certificado público si es necesario
 FETCH_CERT="${FETCH_CERT:-false}"
 
+# Colores
+GREEN='\033[0;32m'
+YELLOW='\033[1;33m'
+RED='\033[0;31m'
+NC='\033[0m'
+
+# Función de reintentos
+retry() {
+  local -r max=${RETRY_MAX:-5}
+  local -r delay=${RETRY_DELAY:-2}
+  local i=0
+  until "$@"; do
+    i=$((i+1))
+    if [ $i -ge $max ]; then
+      echo -e "${RED}✗ Comando falló después de $i intentos: $*${NC}"
+      return 1
+    fi
+    echo -e "${YELLOW}🔄 Reintentando ($i/$max): $*${NC}"
+    sleep $((delay * i))
+  done
+}
+
 echo "::group::Verificando configuración"
+
+# Detectar y validar KUBECONFIG
+echo "[i] Buscando KUBECONFIG..."
+KUBECONFIG_PATHS=(
+  "${RUNNER_TEMP}/kubeconfig-artifact/kubeconfig"  # Desde artefacto de Actions
+  "/etc/rancher/k3s/k3s.yaml"                       # k3s instalado
+  "${HOME}/kubeconfig"                              # Ubicación estándar
+  "${HOME}/.kube/config"                            # Ubicación por defecto
+)
+
+KUBECONFIG_FOUND=false
+for kb_path in "${KUBECONFIG_PATHS[@]}"; do
+  if [ -f "$kb_path" ]; then
+    export KUBECONFIG="$kb_path"
+    echo -e "${GREEN}✓ KUBECONFIG encontrado: $KUBECONFIG${NC}"
+    KUBECONFIG_FOUND=true
+    break
+  fi
+done
+
+if [ "$KUBECONFIG_FOUND" = false ]; then
+  echo -e "${RED}✗ ERROR: No se encontró KUBECONFIG${NC}"
+  echo "Se buscó en:"
+  for kb_path in "${KUBECONFIG_PATHS[@]}"; do
+    echo "  - $kb_path"
+  done
+  exit 1
+fi
 
 # Crear directorio si no existe
 mkdir -p "$(dirname "$CERT_PATH")"
@@ -293,67 +344,104 @@ else
 fi
 echo "::endgroup::"
 
+echo "::group::Validando conectividad al cluster"
+if ! retry kubectl cluster-info >/dev/null 2>&1; then
+  echo -e "${RED}✗ ERROR: No se puede conectar al cluster${NC}"
+  echo ""
+  echo "Verifica:"
+  echo "1. Que K3s está corriendo: sudo systemctl status k3s"
+  echo "2. Que KUBECONFIG es correcto: echo \$KUBECONFIG"
+  echo "3. Que tienes acceso de lectura: ls -la \$KUBECONFIG"
+  exit 1
+fi
+echo -e "${GREEN}✓ Cluster Kubernetes accesible${NC}"
+echo "::endgroup::"
+
 echo "::group::Comprobando directorio de salida"
 if [ ! -d "${OUT_DIR}" ]; then
   mkdir -p "${OUT_DIR}"
-  echo "✓ Directorio creado: ${OUT_DIR}"
+  echo -e "${GREEN}✓ Directorio creado: ${OUT_DIR}${NC}"
 else
-  echo "✓ Directorio ya existe: ${OUT_DIR}"
+  echo -e "${GREEN}✓ Directorio ya existe: ${OUT_DIR}${NC}"
 fi
 echo "::endgroup::"
 
 echo "::group::Validando variables de entorno"
 if [ -z "${GRAFANA_ADMIN_PASSWORD:-}" ]; then
-  echo "ERROR: Debes exportar GRAFANA_ADMIN_PASSWORD"
-  echo "Uso: GRAFANA_ADMIN_PASSWORD='tu-contraseña' $0"
+  echo -e "${RED}✗ ERROR: Variable de entorno GRAFANA_ADMIN_PASSWORD no configurada${NC}"
+  echo ""
+  echo "Solución: Exporta la variable antes de ejecutar este script:"
+  echo "  export GRAFANA_ADMIN_PASSWORD='tu-contraseña-segura'"
+  echo ""
+  echo "O pásala como variable de entorno:"
+  echo "  GRAFANA_ADMIN_PASSWORD='tu-contraseña-segura' $0"
   exit 1
 fi
-echo "✓ GRAFANA_ADMIN_PASSWORD configurada"
+echo -e "${GREEN}✓ GRAFANA_ADMIN_PASSWORD configurada${NC}"
 echo "::endgroup::"
 
 echo "::group::Verificando dependencias"
 
-# Verificar htpasswd (para generar hash bcrypt)
+# Instalar htpasswd si falta
 if ! command -v htpasswd &> /dev/null; then
-  echo "[!] htpasswd no encontrado. Instalando..."
-  sudo apt-get update && sudo apt-get install -y apache2-utils
-fi
-echo "✓ htpasswd disponible"
-
-# Verificar yq (para manipulación YAML)
-if ! command -v yq &> /dev/null; then
-  echo "[!] yq no encontrado. Instalando..."
-  if ! sudo curl -fsSL https://github.com/mikefarah/yq/releases/latest/download/yq_linux_amd64 -o /usr/local/bin/yq; then
-    echo "ERROR: No se pudo descargar yq"
+  echo -e "${YELLOW}[!] htpasswd no encontrado. Instalando...${NC}"
+  if ! sudo apt-get update && sudo apt-get install -y apache2-utils; then
+    echo -e "${RED}✗ ERROR: No se pudo instalar apache2-utils${NC}"
     exit 1
   fi
-  sudo chmod +x /usr/local/bin/yq
 fi
-echo "✓ yq disponible"
+echo -e "${GREEN}✓ htpasswd disponible${NC}"
 
-# Verificar jq (para manipulación JSON)
+# Instalar yq si falta
+if ! command -v yq &> /dev/null; then
+  echo -e "${YELLOW}[!] yq no encontrado. Instalando...${NC}"
+  if ! sudo curl -fsSL https://github.com/mikefarah/yq/releases/latest/download/yq_linux_amd64 -o /usr/local/bin/yq; then
+    echo -e "${RED}✗ ERROR: No se pudo descargar yq${NC}"
+    exit 1
+  fi
+  if ! sudo chmod +x /usr/local/bin/yq; then
+    echo -e "${RED}✗ ERROR: No se pudo hacer ejecutable yq${NC}"
+    exit 1
+  fi
+fi
+echo -e "${GREEN}✓ yq disponible${NC}"
+
+# Instalar jq si falta
 if ! command -v jq &> /dev/null; then
-  echo "[!] jq no encontrado. Instalando..."
-  sudo apt-get update && sudo apt-get install -y jq
+  echo -e "${YELLOW}[!] jq no encontrado. Instalando...${NC}"
+  if ! sudo apt-get update && sudo apt-get install -y jq; then
+    echo -e "${RED}✗ ERROR: No se pudo instalar jq${NC}"
+    exit 1
+  fi
 fi
-echo "✓ jq disponible"
+echo -e "${GREEN}✓ jq disponible${NC}"
 
-# Verificar kubeseal
+# Instalar kubeseal si falta
 if ! command -v kubeseal &> /dev/null; then
-  echo "[!] kubeseal no encontrado. Instalando..."
+  echo -e "${YELLOW}[!] kubeseal no encontrado. Instalando...${NC}"
   KUBESEAL_TMP=$(mktemp -d)
   trap "rm -rf $KUBESEAL_TMP" EXIT
-  if ! wget -qO - https://github.com/bitnami-labs/sealed-secrets/releases/download/v0.24.0/kubeseal-0.24.0-linux-amd64.tar.gz | tar xfz - -C "$KUBESEAL_TMP"; then
-    echo "ERROR: No se pudo descargar e instalar kubeseal"
+  
+  # Intentar con wget primero
+  if ! wget -qO - https://github.com/bitnami-labs/sealed-secrets/releases/download/v0.24.0/kubeseal-0.24.0-linux-amd64.tar.gz 2>/dev/null | tar xfz - -C "$KUBESEAL_TMP"; then
+    # Fallback a curl si wget falla
+    if ! curl -fsSL https://github.com/bitnami-labs/sealed-secrets/releases/download/v0.24.0/kubeseal-0.24.0-linux-amd64.tar.gz 2>/dev/null | tar xfz - -C "$KUBESEAL_TMP"; then
+      echo -e "${RED}✗ ERROR: No se pudo descargar kubeseal (wget y curl fallaron)${NC}"
+      exit 1
+    fi
+  fi
+  
+  if ! sudo mv "$KUBESEAL_TMP/kubeseal" /usr/local/bin/; then
+    echo -e "${RED}✗ ERROR: No se pudo mover kubeseal a /usr/local/bin${NC}"
     exit 1
   fi
-  if ! sudo mv "$KUBESEAL_TMP/kubeseal" /usr/local/bin/ || ! sudo chmod +x /usr/local/bin/kubeseal; then
-    echo "ERROR: No se pudo mover kubeseal a /usr/local/bin"
+  
+  if ! sudo chmod +x /usr/local/bin/kubeseal; then
+    echo -e "${RED}✗ ERROR: No se pudo hacer ejecutable kubeseal${NC}"
     exit 1
   fi
 fi
-echo "✓ kubeseal disponible"
-
+echo -e "${GREEN}✓ kubeseal disponible${NC}"
 echo "::endgroup::"
 
 echo "::group::Generando hash bcrypt para Grafana"
