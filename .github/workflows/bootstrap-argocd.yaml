@@ -19,8 +19,8 @@ permissions:
   actions: read
 
 env:
-  KUBECONFIG: $HOME/.kube/config
-  ARTIFACT_DIR: $HOME/bootstrap-artifacts
+  KUBECONFIG: ~/.kube/config
+  ARTIFACT_DIR: ~/bootstrap-artifacts
 
 jobs:
   bootstrap-argocd:
