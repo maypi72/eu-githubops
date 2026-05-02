@@ -7,11 +7,11 @@ configs:
     url: https://argocd.local
     admin.enabled: true
 
-  # Esta es la sección clave para deshabilitar TLS internamente
   params:
     server.insecure: "true"
-    repo.server.plaintext: "true"
-    repo.server: "argocd-repo-server:8081"
+    reposerver.disable.tls: "true"
+    application.instanceLabelKey: argocd.argoproj.io/instance
+    applicationSetController.enable.progressive.syncs: "true"
 
 dex:
   enabled: false
@@ -20,24 +20,42 @@ redis:
   enabled: true
 
 controller:
+  reposerver:
+    strictTLS: false
   replicas: 1
+  dynamicClusterDistribution: false
+  enableMultiSource: true
   resources:
-    requests: { cpu: 150m, memory: 512Mi }
-    limits: { cpu: 500m, memory: 2048Mi }
-  # Forzamos al controller a usar plaintext para evitar el ComparisonError
-  env:
-    - name: ARGOCD_REPO_SERVER_PLAINTEXT
-      value: "true"
-    - name: ENABLE_MULTI_SOURCE_SUPPORT
-      value: "true" 
-
-  extraArgs:
-    - --repo-server-plaintext
+    requests:
+      cpu: 150m
+      memory: 512Mi
+    limits:
+      cpu: 500m
+      memory: 1024Mi
 
 server:
   replicas: 1
+
+  # 🔥 Sobrescritura obligatoria basada en el deployment real
+  extraEnv:
+    - name: ARGOCD_SERVER_REPO_SERVER
+      value: argocd-repo-server:8081
+    - name: ARGOCD_REPO_SERVER_STRICT_TLS
+      value: "false"
+    - name: ARGOCD_REPO_SERVER_TIMEOUT_SECONDS
+      value: "60"
+
+  resources:
+    requests:
+      cpu: 50m
+      memory: 128Mi
+    limits:
+      cpu: 300m
+      memory: 256Mi
+
   service:
     type: ClusterIP
+
   ingress:
     enabled: true
     ingressClassName: nginx
@@ -60,31 +78,15 @@ server:
 repoServer:
   replicas: 1
   resources:
-    requests: { cpu: 300m, memory: 256Mi }
-    limits: { cpu: 1000m, memory: 512Mi }
-
-  extraArgs:
-    - --disable-tls
-    #- --enable-helm
-
-  # Sondas corregidas al puerto 8081 (donde escucha el servicio gRPC sin TLS)
-  livenessProbe:
-    httpGet:
-      path: /healthz?full=true
-      port: 8081
-    initialDelaySeconds: 30
-    timeoutSeconds: 10
-  readinessProbe:
-    httpGet:
-      path: /healthz
-      port: 8081
-    initialDelaySeconds: 30
-    timeoutSeconds: 10
+    requests:
+      cpu: 300m
+      memory: 512Mi
+    limits:
+      cpu: 1000m
+      memory: 1024Mi
 
 applicationSet:
   replicas: 1
-  extraArgs:
-    - --repo-server-plaintext
 
 notifications:
   enabled: false
