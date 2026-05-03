@@ -80,7 +80,7 @@ if ! command -v kubeseal >/dev/null 2>&1; then
   echo "Instalando kubeseal..."
   KUBESEAL_RELEASE=$(curl -s https://api.github.com/repos/bitnami-labs/sealed-secrets/releases/latest)
   KUBESEAL_VERSION=$(echo "$KUBESEAL_RELEASE" | jq -r '.tag_name')
-  KUBESEAL_URL=$(echo "$KUBESEAL_RELEASE" | jq -r '.assets[] | select(.name | contains("linux-amd64") and (contains("tar.gz") | not)) | .browser_download_url')
+  KUBESEAL_URL=$(echo "$KUBESEAL_RELEASE" | jq -r '.assets[] | select(.name | test("kubeseal-.*-linux-amd64$")) | .browser_download_url')
   echo "Descargando versión: $KUBESEAL_VERSION"
   if [ -z "$KUBESEAL_VERSION" ] || [ -z "$KUBESEAL_URL" ]; then
     echo "✗ No se pudo encontrar versión o URL de descarga de kubeseal"
