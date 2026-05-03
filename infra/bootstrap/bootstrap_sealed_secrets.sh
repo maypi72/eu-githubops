@@ -75,25 +75,55 @@ fi
 echo "Sealed Secrets no está instalado o no está completamente operativo"
 echo "::endgroup::"
 
-echo "::group::Verificando e instalando kubeseal"
-if ! command -v kubeseal >/dev/null 2>&1; then
-  echo "Instalando kubeseal..."
-  KUBESEAL_RELEASE=$(curl -s https://api.github.com/repos/bitnami-labs/sealed-secrets/releases/latest)
-  KUBESEAL_VERSION=$(echo "$KUBESEAL_RELEASE" | jq -r '.tag_name')
-  KUBESEAL_URL=$(echo "$KUBESEAL_RELEASE" | jq -r '.assets[] | select(.name | test("kubeseal-.*-linux-amd64$")) | .browser_download_url')
-  echo "Descargando versión: $KUBESEAL_VERSION"
-  if [ -z "$KUBESEAL_VERSION" ] || [ -z "$KUBESEAL_URL" ]; then
-    echo "✗ No se pudo encontrar versión o URL de descarga de kubeseal"
+# Función para instalar kubeseal
+install_kubeseal() {
+  echo "::group::Verificando e instalando kubeseal"
+  echo "  [i] Verificando kubeseal..."
+
+  if command -v kubeseal >/dev/null 2>&1; then
+    echo "    [✓] kubeseal ya está instalado"
+    echo "::endgroup::"
+    return 0
+  fi
+
+  # Versión esperada desde el workflow
+  VERSION="${KUBESEAL_VERSION:-v0.36.6}"
+  BASE_VERSION="${VERSION#v}"
+
+  echo "  [i] kubeseal no encontrado, instalando..."
+  echo "    Versión: $VERSION"
+
+  # Detectar arquitectura
+  ARCH=$(uname -m)
+  case "$ARCH" in
+    x86_64)   ARCH_DL="amd64" ;;
+    aarch64)  ARCH_DL="arm64" ;;
+    *) echo "    [✗] Arquitectura no soportada: $ARCH"; echo "::endgroup::"; exit 1 ;;
+  esac
+
+  # Construir URL correcta (binario directo, no tar.gz)
+  URL="https://github.com/bitnami-labs/sealed-secrets/releases/download/${VERSION}/kubeseal-${BASE_VERSION}-linux-${ARCH_DL}"
+
+  echo "    URL: $URL"
+
+  # Validar que el asset existe
+  if ! curl --head --fail -s "$URL" >/dev/null; then
+    echo "    [✗] No existe el asset en GitHub Releases"
+    echo "::endgroup::"
     exit 1
   fi
-  curl -sL "$KUBESEAL_URL" -o /tmp/kubeseal
+
+  # Descargar e instalar
+  curl -L -o /tmp/kubeseal "$URL"
+  chmod +x /tmp/kubeseal
   sudo mv /tmp/kubeseal /usr/local/bin/
-  sudo chmod +x /usr/local/bin/kubeseal
-  echo "✓ kubeseal instalado: $(kubeseal --version)"
-else
-  echo "✓ kubeseal disponible: $(kubeseal --version)"
-fi
-echo "::endgroup::"
+
+  echo "    [✓] kubeseal instalado correctamente"
+  echo "::endgroup::"
+}
+
+# Instalar kubeseal
+install_kubeseal
 
 echo "::group::Comprobando fichero de values"
 if [ ! -f "$SEALED_SECRETS_VALUES" ]; then
