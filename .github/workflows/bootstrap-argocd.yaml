@@ -36,13 +36,34 @@ jobs:
       - name: Verify kubeconfig
         run: |
           echo "::group::Verificando kubeconfig"
-          if [ ! -f "$KUBECONFIG" ]; then
-            echo "[✗] KUBECONFIG no encontrado en $KUBECONFIG"
+          
+          # Buscar kubeconfig en ubicaciones estándar
+          KUBECONFIG_PATHS=(
+            "/etc/rancher/k3s/k3s.yaml"
+            "$HOME/kubeconfig"
+            "$HOME/.kube/config"
+          )
+          
+          KUBECONFIG_FOUND=false
+          for kb_path in "${KUBECONFIG_PATHS[@]}"; do
+            if [ -f "$kb_path" ] && [ -s "$kb_path" ]; then
+              export KUBECONFIG="$kb_path"
+              KUBECONFIG_FOUND=true
+              break
+            fi
+          done
+          
+          if [ "$KUBECONFIG_FOUND" = false ]; then
+            echo "[✗] KUBECONFIG no encontrado en ubicaciones estándar"
             exit 1
           fi
-
-          kubectl cluster-info >/dev/null
-          echo "[✓] Conectado al cluster"
+          
+          if ! kubectl cluster-info >/dev/null 2>&1; then
+            echo "[✗] No se puede conectar al cluster"
+            exit 1
+          fi
+          
+          echo "[✓] Conectado al cluster en: $KUBECONFIG"
           echo "::endgroup::"
 
       - name: Verify required tools
