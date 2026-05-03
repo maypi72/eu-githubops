@@ -143,6 +143,10 @@ jobs:
         if: needs.normalize-inputs.outputs.install_cert_manager == 'true'
         run: sudo bash infra/bootstrap/bootstrap_certmanager.sh
 
+      - name: Install ClusterIssuer
+        if: needs.normalize-inputs.outputs.install_cert_manager == 'true'
+        run: sudo bash infra/bootstrap/bootstrap_clusterissuer.sh
+
       - name: Install Sealed-Secrets
         if: needs.normalize-inputs.outputs.install_sealed_secrets == 'true'
         run: sudo bash infra/bootstrap/bootstrap_sealed_secrets.sh
