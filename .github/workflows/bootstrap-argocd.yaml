@@ -163,24 +163,49 @@ jobs:
           echo "::endgroup::"
 
       # -------------------------------------------------
-      # APPLY TO CLUSTER (OPTIONAL)
-      # -------------------------------------------------
-      - name: Apply Sealed Secret to Cluster
-        if: inputs.apply_sealed_secret && steps.generate-secret.outputs.generated == 'true'
-        run: |
-          echo "::group::Aplicando SealedSecret"
-          kubectl apply -f infra/argocd/sealed-secrets/argocd-secret.yaml
-          echo "[✓] Secreto aplicado"
-          echo "::endgroup::"
-
-      # -------------------------------------------------
-      # BOOTSTRAP ARGOCD
+      # BOOTSTRAP ARGOCD (PRIMERO - sin el secret nuevo)
       # -------------------------------------------------
       - name: Install / Upgrade ArgoCD
         run: |
-          echo "::group::Bootstrap ArgoCD"
+          echo "::group::Instalando ArgoCD"
           chmod +x infra/bootstrap/bootstrap_argocd.sh
           bash infra/bootstrap/bootstrap_argocd.sh
+          echo "::endgroup::"
+
+      # -------------------------------------------------
+      # WAIT FOR ARGOCD PODS
+      # -------------------------------------------------
+      - name: Wait for ArgoCD pods to be ready
+        run: |
+          echo "::group::Esperando a que los pods de ArgoCD estén listos"
+          kubectl wait --for=condition=ready pod -l app.kubernetes.io/name=argocd-server -n argocd --timeout=300s || true
+          kubectl wait --for=condition=ready pod -l app.kubernetes.io/name=argocd-application-controller -n argocd --timeout=300s || true
+          echo "[✓] Pods de ArgoCD listos"
+          echo "::endgroup::"
+
+      # -------------------------------------------------
+      # APPLY NEW PASSWORD SECRET
+      # -------------------------------------------------
+      - name: Apply ArgoCD Admin Password Secret
+        if: steps.generate-secret.outputs.generated == 'true'
+        run: |
+          echo "::group::Actualizando contraseña de ArgoCD"
+          
+          # Crear namespace si no existe
+          kubectl create namespace argocd --dry-run=client -o yaml | kubectl apply -f -
+          
+          # Aplicar el nuevo secret sellado
+          kubectl apply -f infra/argocd/sealed-secrets/argocd-secret.yaml
+          echo "[✓] Secret aplicado"
+          
+          # Esperar a que el secret se sincronice
+          sleep 5
+          
+          # Triggerar reinicio de argocd-server para que lea el nuevo secret
+          kubectl rollout restart deployment/argocd-server -n argocd
+          kubectl rollout status deployment/argocd-server -n argocd --timeout=300s
+          
+          echo "[✓] ArgoCD actualizado con nueva contraseña"
           echo "::endgroup::"
 
       # -------------------------------------------------
