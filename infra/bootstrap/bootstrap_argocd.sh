@@ -113,13 +113,9 @@ echo "::endgroup::"
 
 echo "::group::Agregando repositorio Helm de ArgoCD"
 
-# Actualizar lista de repos
-helm repo update
-
 # Agregar repositorio si no existe
-if helm repo list | grep -q "^${HELM_REPO_NAME}"; then
+if helm repo list 2>/dev/null | grep -q "^${HELM_REPO_NAME}"; then
   echo -e "${YELLOW}! Repositorio $HELM_REPO_NAME ya agregado${NC}"
-  helm repo update "$HELM_REPO_NAME"
 else
   if ! helm repo add "$HELM_REPO_NAME" "$HELM_REPO_URL"; then
     echo -e "${RED}ERROR: Falló la adición del repositorio${NC}"
@@ -127,6 +123,9 @@ else
   fi
   echo -e "${GREEN}✓ Repositorio $HELM_REPO_NAME agregado${NC}"
 fi
+
+# Actualizar lista de repos
+helm repo update
 
 echo "::endgroup::"
 
