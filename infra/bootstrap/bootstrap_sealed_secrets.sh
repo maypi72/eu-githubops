@@ -103,8 +103,8 @@ install_kubeseal() {
 
   echo "    URL: $URL"
 
-  # Validación correcta (sin HEAD)
-  if ! curl -sSfL "$URL" -o /tmp/kubeseal; then
+  # Validación correcta con User-Agent
+  if ! curl -sSfL -A "Mozilla/5.0" "$URL" -o /tmp/kubeseal; then
     echo "    [✗] No existe el asset en GitHub Releases"
     echo "::endgroup::"
     exit 1
