@@ -51,9 +51,6 @@ concurrency:
   group: bootstrap-cluster
   cancel-in-progress: true
 
-env:
-  KUBECONFIG: ${{ runner.home }}/.kube/config
-
 # =========================================================
 # JOB 0 – NORMALIZE INPUTS
 # =========================================================

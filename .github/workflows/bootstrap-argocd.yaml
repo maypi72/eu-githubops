@@ -18,10 +18,6 @@ permissions:
   id-token: write
   actions: read
 
-env:
-  KUBECONFIG: ${{ runner.home }}/.kube/config
-  ARTIFACT_DIR: ${{ runner.home }}/bootstrap-artifacts
-
 jobs:
   bootstrap-argocd:
     name: Bootstrap ArgoCD
