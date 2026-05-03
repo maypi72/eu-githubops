@@ -86,11 +86,10 @@ install_kubeseal() {
     return 0
   fi
 
-  VERSION="${KUBESEAL_VERSION:-v0.36.6}"
-  BASE_VERSION="${VERSION#v}"
+  KUBESEAL_VERSION="0.36.6"
 
   echo "  [i] kubeseal no encontrado, instalando..."
-  echo "    Versión: $VERSION"
+  echo "    Versión: $KUBESEAL_VERSION"
 
   ARCH=$(uname -m)
   case "$ARCH" in
@@ -99,19 +98,29 @@ install_kubeseal() {
     *) echo "    [✗] Arquitectura no soportada: $ARCH"; echo "::endgroup::"; exit 1 ;;
   esac
 
-  URL="https://github.com/bitnami-labs/sealed-secrets/releases/download/${VERSION}/kubeseal-${BASE_VERSION}-linux-${ARCH_DL}"
+  cd /tmp
+  TARBALL="kubeseal-${KUBESEAL_VERSION}-linux-${ARCH_DL}.tar.gz"
+  URL="https://github.com/bitnami-labs/sealed-secrets/releases/download/v${KUBESEAL_VERSION}/${TARBALL}"
 
   echo "    URL: $URL"
 
-  # Descargar con wget (sin HEAD, sin tar)
-  if ! wget -q --show-progress -O /tmp/kubeseal "$URL"; then
+  # Descargar tar.gz
+  if ! wget -q --show-progress -O "${TARBALL}" "$URL"; then
     echo "    [✗] Error descargando kubeseal"
     echo "::endgroup::"
     exit 1
   fi
 
-  chmod +x /tmp/kubeseal
-  sudo install -m 755 /tmp/kubeseal /usr/local/bin/kubeseal
+  # Extraer
+  if ! tar -xzf "${TARBALL}" kubeseal; then
+    echo "    [✗] Error extrayendo kubeseal"
+    echo "::endgroup::"
+    exit 1
+  fi
+
+  # Instalar
+  sudo install -m 755 kubeseal /usr/local/bin/kubeseal
+  rm -f "${TARBALL}" kubeseal
 
   echo "    [✓] kubeseal instalado correctamente"
   echo "::endgroup::"
