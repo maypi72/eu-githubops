@@ -47,7 +47,6 @@ echo "::group::Verificando configuración"
 # Detectar y validar KUBECONFIG
 echo "[i] Buscando KUBECONFIG..."
 KUBECONFIG_PATHS=(
-  "${RUNNER_TEMP}/kubeconfig-artifact/kubeconfig"  # Desde artefacto de Actions
   "/etc/rancher/k3s/k3s.yaml"                       # k3s instalado
   "${HOME}/kubeconfig"                              # Ubicación estándar
   "${HOME}/.kube/config"                            # Ubicación por defecto
@@ -55,13 +54,28 @@ KUBECONFIG_PATHS=(
 
 KUBECONFIG_FOUND=false
 for kb_path in "${KUBECONFIG_PATHS[@]}"; do
-  if [ -f "$kb_path" ]; then
+  if [ -f "$kb_path" ] && [ -s "$kb_path" ]; then
     export KUBECONFIG="$kb_path"
     echo -e "${GREEN}✓ KUBECONFIG encontrado: $KUBECONFIG${NC}"
     KUBECONFIG_FOUND=true
     break
   fi
 done
+
+# Si no encontró, intentar copiar desde k3s
+if [ "$KUBECONFIG_FOUND" = false ]; then
+  if [ -f "/etc/rancher/k3s/k3s.yaml" ]; then
+    echo "[i] KUBECONFIG no encontrado. Copiando desde /etc/rancher/k3s/k3s.yaml..."
+    TARGET_KUBECONFIG="${HOME}/.kube/config"
+    mkdir -p "$(dirname "$TARGET_KUBECONFIG")"
+    sudo cp /etc/rancher/k3s/k3s.yaml "$TARGET_KUBECONFIG"
+    sudo chown "$(whoami):$(whoami)" "$TARGET_KUBECONFIG"
+    sudo chmod 600 "$TARGET_KUBECONFIG"
+    export KUBECONFIG="$TARGET_KUBECONFIG"
+    echo -e "${GREEN}✓ KUBECONFIG copiado a: $KUBECONFIG${NC}"
+    KUBECONFIG_FOUND=true
+  fi
+fi
 
 if [ "$KUBECONFIG_FOUND" = false ]; then
   echo -e "${RED}✗ ERROR: No se encontró KUBECONFIG${NC}"
