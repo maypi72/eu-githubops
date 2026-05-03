@@ -103,15 +103,15 @@ install_kubeseal() {
 
   echo "    URL: $URL"
 
-  # Validación correcta con User-Agent
-  if ! curl -sSfL -A "Mozilla/5.0" "$URL" -o /tmp/kubeseal; then
-    echo "    [✗] No existe el asset en GitHub Releases"
+  # Descargar con wget (sin HEAD, sin tar)
+  if ! wget -q --show-progress -O /tmp/kubeseal "$URL"; then
+    echo "    [✗] Error descargando kubeseal"
     echo "::endgroup::"
     exit 1
   fi
 
   chmod +x /tmp/kubeseal
-  sudo mv /tmp/kubeseal /usr/local/bin/
+  sudo install -m 755 /tmp/kubeseal /usr/local/bin/kubeseal
 
   echo "    [✓] kubeseal instalado correctamente"
   echo "::endgroup::"
