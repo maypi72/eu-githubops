@@ -129,7 +129,6 @@ jobs:
   install-addons:
     name: Install Core Addons
     needs:
-      - install-helm
       - normalize-inputs
     runs-on: [self-hosted, linux]
     steps:
