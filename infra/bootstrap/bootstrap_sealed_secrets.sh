@@ -79,10 +79,10 @@ echo "::group::Verificando e instalando kubeseal"
 if ! command -v kubeseal >/dev/null 2>&1; then
   echo "Instalando kubeseal..."
   KUBESEAL_RELEASE=$(curl -s https://api.github.com/repos/bitnami-labs/sealed-secrets/releases/latest)
-  KUBESEAL_URL=$(echo "$KUBESEAL_RELEASE" | grep 'browser_download_url.*linux-amd64.tar.gz' | cut -d'"' -f4)
+  KUBESEAL_URL=$(echo "$KUBESEAL_RELEASE" | grep 'browser_download_url.*linux-amd64"' | grep -v '\.tar\.gz' | cut -d'"' -f4)
   KUBESEAL_VERSION=$(echo "$KUBESEAL_RELEASE" | grep tag_name | head -1 | cut -d'"' -f4)
   echo "Descargando versión: $KUBESEAL_VERSION"
-  curl -sL "$KUBESEAL_URL" | tar xz -C /tmp/
+  curl -sL "$KUBESEAL_URL" -o /tmp/kubeseal
   sudo mv /tmp/kubeseal /usr/local/bin/
   sudo chmod +x /usr/local/bin/kubeseal
   echo "✓ kubeseal instalado: $(kubeseal --version)"
