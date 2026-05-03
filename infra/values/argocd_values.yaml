@@ -71,7 +71,7 @@ server:
       - /
     pathType: Prefix
     tls:
-      - secretName: argocd-tls
+      - secretName: argocd-server-tls
         hosts:
           - argocd.local
 
