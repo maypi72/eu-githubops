@@ -52,7 +52,7 @@ concurrency:
   cancel-in-progress: true
 
 env:
-  KUBECONFIG: $HOME/.kube/config
+  KUBECONFIG: ${{ runner.home }}/.kube/config
 
 # =========================================================
 # JOB 0 – NORMALIZE INPUTS
