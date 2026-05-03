@@ -86,14 +86,12 @@ install_kubeseal() {
     return 0
   fi
 
-  # Versión esperada desde el workflow
   VERSION="${KUBESEAL_VERSION:-v0.36.6}"
   BASE_VERSION="${VERSION#v}"
 
   echo "  [i] kubeseal no encontrado, instalando..."
   echo "    Versión: $VERSION"
 
-  # Detectar arquitectura
   ARCH=$(uname -m)
   case "$ARCH" in
     x86_64)   ARCH_DL="amd64" ;;
@@ -101,20 +99,17 @@ install_kubeseal() {
     *) echo "    [✗] Arquitectura no soportada: $ARCH"; echo "::endgroup::"; exit 1 ;;
   esac
 
-  # Construir URL correcta (binario directo, no tar.gz)
   URL="https://github.com/bitnami-labs/sealed-secrets/releases/download/${VERSION}/kubeseal-${BASE_VERSION}-linux-${ARCH_DL}"
 
   echo "    URL: $URL"
 
-  # Validar que el asset existe
-  if ! curl --head --fail -s "$URL" >/dev/null; then
+  # Validación correcta (sin HEAD)
+  if ! curl -sSfL "$URL" -o /tmp/kubeseal; then
     echo "    [✗] No existe el asset en GitHub Releases"
     echo "::endgroup::"
     exit 1
   fi
 
-  # Descargar e instalar
-  curl -L -o /tmp/kubeseal "$URL"
   chmod +x /tmp/kubeseal
   sudo mv /tmp/kubeseal /usr/local/bin/
 
