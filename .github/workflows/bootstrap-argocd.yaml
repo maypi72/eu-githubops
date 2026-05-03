@@ -68,8 +68,24 @@ jobs:
 
       - name: Verify required tools
         run: |
-          echo "::group::Verificando herramientas"
-          for tool in kubectl helm yq kubeseal htpasswd; do
+          echo "::group::Verificando e instalando herramientas"
+          
+          # Instalar kubeseal si no existe
+          if ! command -v kubeseal >/dev/null; then
+            echo "[i] kubeseal no encontrado, instalando..."
+            KUBESEAL_VERSION=$(curl -s https://api.github.com/repos/bitnami-labs/sealed-secrets/releases/latest | grep tag_name | cut -d'"' -f4)
+            echo "  Descargando versión: $KUBESEAL_VERSION"
+            curl -sL "https://github.com/bitnami-labs/sealed-secrets/releases/download/${KUBESEAL_VERSION}/kubeseal-${KUBESEAL_VERSION##*/}-linux-amd64.tar.gz" \
+              | tar xz -C /tmp/
+            sudo mv /tmp/kubeseal /usr/local/bin/
+            sudo chmod +x /usr/local/bin/kubeseal
+            echo "[✓] kubeseal instalado: $(kubeseal --version)"
+          else
+            echo "[✓] kubeseal: $(kubeseal --version)"
+          fi
+          
+          # Verificar otras herramientas
+          for tool in kubectl helm yq htpasswd; do
             if ! command -v "$tool" >/dev/null; then
               echo "[✗] Falta herramienta: $tool"
               exit 1

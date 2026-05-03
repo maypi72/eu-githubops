@@ -75,6 +75,21 @@ fi
 echo "Sealed Secrets no está instalado o no está completamente operativo"
 echo "::endgroup::"
 
+echo "::group::Verificando e instalando kubeseal"
+if ! command -v kubeseal >/dev/null 2>&1; then
+  echo "Instalando kubeseal..."
+  KUBESEAL_VERSION=$(curl -s https://api.github.com/repos/bitnami-labs/sealed-secrets/releases/latest | grep tag_name | cut -d'"' -f4)
+  echo "Descargando versión: $KUBESEAL_VERSION"
+  curl -sL "https://github.com/bitnami-labs/sealed-secrets/releases/download/${KUBESEAL_VERSION}/kubeseal-${KUBESEAL_VERSION##*/}-linux-amd64.tar.gz" \
+    | tar xz -C /tmp/
+  sudo mv /tmp/kubeseal /usr/local/bin/
+  sudo chmod +x /usr/local/bin/kubeseal
+  echo "✓ kubeseal instalado: $(kubeseal --version)"
+else
+  echo "✓ kubeseal disponible: $(kubeseal --version)"
+fi
+echo "::endgroup::"
+
 echo "::group::Comprobando fichero de values"
 if [ ! -f "$SEALED_SECRETS_VALUES" ]; then
   echo "ERROR: Fichero de values no existe en: $SEALED_SECRETS_VALUES"
