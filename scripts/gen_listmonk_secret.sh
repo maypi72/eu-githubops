@@ -102,12 +102,20 @@ echo "[✓] YAML validado"
 echo ""
 echo "[i] Realizando git operations..."
 
+# Configurar git
+git config user.name "gha-runner" 2>/dev/null || true
+git config user.email "gha-runner@users.noreply.github.com" 2>/dev/null || true
+
 if [[ -n $(git -C "$PROJECT_ROOT" status -s "$OUTPUT_FILE") ]]; then
   git -C "$PROJECT_ROOT" add "$OUTPUT_FILE"
   git -C "$PROJECT_ROOT" commit -m "chore: regenerate listmonk database secret" || true
   
   if [[ -z "${GITHUB_ACTIONS}" ]]; then
-    git -C "$PROJECT_ROOT" push origin main || echo "[!] Push fallido"
+    if [ -n "${GITHUB_TOKEN:-}" ] && [ -n "${GITHUB_REPOSITORY:-}" ]; then
+      git -C "$PROJECT_ROOT" push "https://x-access-token:${GITHUB_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" main
+    else
+      git -C "$PROJECT_ROOT" push origin main || echo "[!] Push fallido"
+    fi
   else
     echo "[✓] En GitHub Actions - push será automático"
   fi

@@ -607,8 +607,8 @@ echo "::group::Git operations"
 if [ "$CI_ENVIRONMENT" = "true" ]; then
   echo -e "${GREEN}[i] Ambiente CI detectado (GitHub Actions)${NC}"
   # Configurar git en CI
-  git config user.name "github-actions[bot]" 2>/dev/null || true
-  git config user.email "github-actions[bot]@users.noreply.github.com" 2>/dev/null || true
+  git config user.name "gha-runner" 2>/dev/null || true
+  git config user.email "gha-runner@users.noreply.github.com" 2>/dev/null || true
 fi
 # Agregar el secreto sellado
 git add "${OUT_DIR}/${SECRET_NAME}.yaml"

@@ -628,8 +628,8 @@ echo "::endgroup::"
 echo "::group::Git operations"
 
 # Configurar git
-git config user.name "github-actions[bot]" 2>/dev/null || true
-git config user.email "github-actions[bot]@users.noreply.github.com" 2>/dev/null || true
+git config user.name "gha-runner" 2>/dev/null || true
+git config user.email "gha-runner@users.noreply.github.com" 2>/dev/null || true
 
 # Agregar el secreto sellado
 git add "${OUT_DIR}/${SECRET_NAME}.yaml"
@@ -659,7 +659,11 @@ if ! git diff --cached --quiet; then
   
   if [ "$SKIP_GIT_PUSH" = "false" ] || [ "$SKIP_GIT_PUSH" = "" ]; then
     echo "Haciendo push a origin..."
-    git push origin HEAD
+    if [ -n "${GITHUB_TOKEN:-}" ] && [ -n "${GITHUB_REPOSITORY:-}" ]; then
+      git push "https://x-access-token:${GITHUB_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" HEAD
+    else
+      git push origin HEAD
+    fi
     echo "✓ Cambios subidos a git"
   else
     echo "[i] SKIP_GIT_PUSH=true: No se hizo push automático"
