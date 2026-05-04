@@ -713,10 +713,84 @@ kubectl logs -n cert-manager deployment/cert-manager -f
 kubectl get certificates -A
 ```
 
+### ⚠️ ArgoCD UI: "Unable to load data - CORS/TLS Mismatch"
+
+**Síntoma**: ArgoCD UI muestra error:
+```
+Unable to load data: Request has been terminated
+Possible causes: the network is offline, Origin is not allowed by Access-Control-Allow-Origin, the page is being unloaded, etc.
+```
+
+**Causa raíz**: Mismatch entre protocolo del navegador → ingress → ArgoCD
+
+ArgoCD automáticamente **activa HTTPS en puerto 8083** si detecta el secret `argocd-server-tls`, aunque tengas `server.insecure: true` configurado.
+
+**Cascada de decisión de TLS en ArgoCD**:
+
+1. ¿Existe secret `argocd-server-tls` con `tls.crt` + `tls.key`?
+   - **SÍ** → ArgoCD activa HTTPS en 8083 automáticamente
+   - **NO** → va al paso 2
+
+2. ¿Existe secret `argocd-secret` con `tls.crt` + `tls.key`?
+   - **SÍ** → ArgoCD activa HTTPS en 8083
+   - **NO** → va al paso 3
+
+3. ¿No hay certificados?
+   - ArgoCD genera self-signed y respeta `server.insecure: true` → HTTP en 8080
+
+**Solución**: Usar un nombre diferente para el secret del ingress
+
+En [infra/values/argocd_values.yaml](infra/values/argocd_values.yaml):
+
+```yaml
+server:
+  ingress:
+    enabled: true
+    annotations:
+      cert-manager.io/cluster-issuer: mygitops-ca
+      nginx.ingress.kubernetes.io/backend-protocol: "HTTP"  # ← Conexión interna por HTTP
+      nginx.ingress.kubernetes.io/ssl-redirect: "true"
+    tls:
+      - secretName: argocd-tls  # ← ⭐ Nombre diferente a argocd-server-tls
+        hosts:
+          - argocd.local
+
+params:
+  server.insecure: "true"  # ← HTTP interno en 8080
+```
+
+**Por qué funciona**:
+- **ingress** pide `argocd-tls` → cert-manager crea ese secret
+- **ArgoCD busca** `argocd-server-tls` → no lo encuentra
+- **ArgoCD respeta** `server.insecure: true` → usa HTTP
+- **Resultado**: 
+  - Cliente → Ingress: HTTPS ✅
+  - Ingress → ArgoCD: HTTP ✅
+  - Sin conflicto de protocolos → Sin CORS errors ✅
+
+**Si el secret `argocd-server-tls` sigue recreándose**:
+
+El Helm chart tiene hardcodeado ese nombre en el ingress. Sobrescribir con `kubectl patch`:
+
+```bash
+# Cambiar el nombre del secret en el ingress
+kubectl patch ingress argocd-server -n argocd --type='json' \
+  -p='[{"op": "replace", "path": "/spec/tls/0/secretName", "value": "argocd-tls"}]'
+
+# Eliminar el secret antiguo
+kubectl delete secret argocd-server-tls -n argocd
+
+# cert-manager detectará el cambio y creará argocd-tls
+kubectl get secrets -n argocd | grep argocd-tls
+```
+
+**Reference**: [Argo CD TLS Configuration](https://argo-cd.readthedocs.io/en/stable/operator-manual/tls/)
+
 ---
 
 ## 📚 Documentación Adicional
 
+- [ARGOCD_TLS_GUIDE.md](ARGOCD_TLS_GUIDE.md) - ⭐ **Solución TLS mismatch en ArgoCD UI**
 - [BOOTSTRAP_ARGOCD_GUIDE.md](BOOTSTRAP_ARGOCD_GUIDE.md) - Guía detallada de ArgoCD
 - [ROOTAPP_GUIDE.md](ROOTAPP_GUIDE.md) - Aplicar root-platform.yaml y root-apps.yaml
 - [CLUSTERISSUER_GUIDE.md](CLUSTERISSUER_GUIDE.md) - Configurar TLS automático
