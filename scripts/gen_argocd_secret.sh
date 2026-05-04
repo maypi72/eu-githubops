@@ -556,7 +556,7 @@ echo ""
 if ! kubeseal \
   --cert "$CERT_PATH" \
   --format yaml \
-  --scope strict \
+  --scope namespace \
   < "${OUT_DIR}/${SECRET_NAME}.raw.yaml" \
   > "${OUT_DIR}/${SECRET_NAME}.yaml" 2>/tmp/kubeseal.err; then
   
