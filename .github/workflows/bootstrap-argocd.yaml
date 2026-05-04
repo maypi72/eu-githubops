@@ -184,28 +184,134 @@ jobs:
           echo "::endgroup::"
 
       # -------------------------------------------------
+      # PRE-CONDITIONS: VALIDATE SECRET FILE
+      # -------------------------------------------------
+      - name: Validate sealed secret file
+        if: steps.generate-secret.outputs.generated == 'true'
+        run: |
+          echo "::group::Pre-condición: Validando archivo del secret"
+          
+          SECRET_FILE="infra/argocd/sealed-secrets/argocd-secret.yaml"
+          
+          # Verificar que el archivo existe
+          if [ ! -f "$SECRET_FILE" ]; then
+            echo "[✗] ERROR: Archivo no encontrado: $SECRET_FILE"
+            exit 1
+          fi
+          echo "[✓] Archivo existe"
+          
+          # Verificar que es YAML válido
+          if ! yq eval '.' "$SECRET_FILE" > /dev/null 2>&1; then
+            echo "[✗] ERROR: YAML inválido"
+            exit 1
+          fi
+          echo "[✓] YAML válido"
+          
+          # Verificar que es un SealedSecret
+          if ! yq eval '.kind' "$SECRET_FILE" 2>/dev/null | grep -q "SealedSecret"; then
+            echo "[✗] ERROR: No es un SealedSecret válido"
+            yq eval '.kind' "$SECRET_FILE"
+            exit 1
+          fi
+          echo "[✓] Es un SealedSecret válido"
+          
+          # Verificar que tiene el namespace correcto
+          if ! yq eval '.metadata.namespace' "$SECRET_FILE" 2>/dev/null | grep -q "argocd"; then
+            echo "[✗] ERROR: Namespace incorrecto"
+            exit 1
+          fi
+          echo "[✓] Namespace: argocd"
+          echo "::endgroup::"
+
+      # -------------------------------------------------
       # APPLY NEW PASSWORD SECRET
       # -------------------------------------------------
       - name: Apply ArgoCD Admin Password Secret
         if: steps.generate-secret.outputs.generated == 'true'
         run: |
-          echo "::group::Actualizando contraseña de ArgoCD"
+          echo "::group::Aplicando nuevo secret sellado"
           
           # Crear namespace si no existe
           kubectl create namespace argocd --dry-run=client -o yaml | kubectl apply -f -
+          echo "[✓] Namespace garantizado"
           
           # Aplicar el nuevo secret sellado
           kubectl apply -f infra/argocd/sealed-secrets/argocd-secret.yaml
           echo "[✓] Secret aplicado"
           
-          # Esperar a que el secret se sincronice
-          sleep 5
+          # Esperar a que el secret se sincronice y se descifre
+          echo "[i] Esperando a que el secret se descifre..."
+          for i in {1..30}; do
+            if kubectl get secret argocd-secret -n argocd -o jsonpath='{.data.admin\.password}' 2>/dev/null | grep -q .; then
+              echo "[✓] Secret desencriptado correctamente"
+              break
+            fi
+            if [ $i -eq 30 ]; then
+              echo "[✗] ERROR: Secret no se descifró después de 30 intentos"
+              exit 1
+            fi
+            sleep 1
+          done
           
-          # Triggerar reinicio de argocd-server para que lea el nuevo secret
+          echo "::endgroup::"
+
+      # -------------------------------------------------
+      # POST-CONDITIONS: RESTART AND VERIFY
+      # -------------------------------------------------
+      - name: Restart ArgoCD and verify
+        if: steps.generate-secret.outputs.generated == 'true'
+        run: |
+          echo "::group::Post-condición: Reiniciando ArgoCD"
+          
+          # Reiniciar argocd-server
           kubectl rollout restart deployment/argocd-server -n argocd
-          kubectl rollout status deployment/argocd-server -n argocd --timeout=300s
+          echo "[i] Reinicio iniciado"
           
-          echo "[✓] ArgoCD actualizado con nueva contraseña"
+          # Esperar a que esté ready
+          if ! kubectl rollout status deployment/argocd-server -n argocd --timeout=300s; then
+            echo "[✗] ERROR: ArgoCD no se reinició correctamente"
+            kubectl logs -n argocd deployment/argocd-server --tail=50
+            exit 1
+          fi
+          echo "[✓] ArgoCD reiniciado correctamente"
+          echo "::endgroup::"
+
+      - name: Verify password was updated
+        if: steps.generate-secret.outputs.generated == 'true'
+        run: |
+          echo "::group::Post-condición: Verificando actualización de contraseña"
+          
+          # Dar un poco más de tiempo para que ArgoCD cargue el nuevo secret
+          sleep 10
+          
+          # Verificar que el secret contiene el hash de contraseña
+          PASSWORD_HASH=$(kubectl get secret argocd-secret -n argocd -o jsonpath='{.data.admin\.password}' 2>/dev/null | base64 -d)
+          
+          if [ -z "$PASSWORD_HASH" ]; then
+            echo "[✗] ERROR: No se encontró hash de contraseña"
+            exit 1
+          fi
+          
+          if ! echo "$PASSWORD_HASH" | grep -q '^\$2a\$'; then
+            echo "[✗] ERROR: Hash no es válido (no es bcrypt)"
+            exit 1
+          fi
+          echo "[✓] Hash de contraseña válido detectado"
+          
+          # Verificar que el pod tiene el secret montado
+          if ! kubectl get pod -n argocd -l app.kubernetes.io/name=argocd-server -o json 2>/dev/null | grep -q "argocd-secret"; then
+            echo "[⚠] ADVERTENCIA: El secret podría no estar correctamente montado"
+          fi
+          echo "[✓] Secret está disponible en el cluster"
+          
+          # Verificar que no hay errores recientes en los logs
+          if kubectl logs -n argocd deployment/argocd-server --tail=20 2>/dev/null | grep -i "invalid.*password\|auth.*fail" > /dev/null; then
+            echo "[⚠] ADVERTENCIA: Se detectaron errores de autenticación en logs recientes"
+            kubectl logs -n argocd deployment/argocd-server --tail=20
+          else
+            echo "[✓] No se detectan errores de autenticación en logs"
+          fi
+          
           echo "::endgroup::"
 
       # -------------------------------------------------
