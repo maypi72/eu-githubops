@@ -224,6 +224,44 @@ jobs:
           echo "::endgroup::"
 
       # -------------------------------------------------
+      # CLEAN UP: REMOVE EXISTING SECRET
+      # -------------------------------------------------
+      - name: Remove existing argocd-secret
+        if: steps.generate-secret.outputs.generated == 'true'
+        run: |
+          echo "::group::Limpiando secret existente"
+          
+          # Verificar si el secret existe
+          if kubectl get secret argocd-secret -n argocd > /dev/null 2>&1; then
+            echo "[i] Secret existente detectado, eliminando..."
+            
+            # Eliminar el secret
+            if kubectl delete secret argocd-secret -n argocd; then
+              echo "[✓] Secret eliminado correctamente"
+            else
+              echo "[✗] ERROR: No se pudo eliminar el secret"
+              exit 1
+            fi
+            
+            # Esperar a que se elimine completamente
+            sleep 2
+            
+            # Verificar que se eliminó
+            if kubectl get secret argocd-secret -n argocd > /dev/null 2>&1; then
+              echo "[✗] ERROR: El secret aún existe después de eliminarlo"
+              exit 1
+            fi
+            echo "[✓] Eliminación confirmada"
+          else
+            echo "[i] No hay secret existente, continuando"
+          fi
+          echo "::endgroup::"
+
+      # -------------------------------------------------
+      # PRE-CONDITIONS: VALIDATE SECRET FILE
+      # -------------------------------------------------
+
+      # -------------------------------------------------
       # APPLY NEW PASSWORD SECRET
       # -------------------------------------------------
       - name: Apply ArgoCD Admin Password Secret
