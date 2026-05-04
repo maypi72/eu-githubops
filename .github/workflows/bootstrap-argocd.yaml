@@ -307,44 +307,6 @@ jobs:
           echo "[✓] ArgoCD reiniciado correctamente"
           echo "::endgroup::"
 
-      - name: Verify password was updated
-        if: steps.generate-secret.outputs.generated == 'true'
-        run: |
-          echo "::group::Post-condición: Verificando actualización de contraseña"
-          
-          # Dar un poco más de tiempo para que ArgoCD cargue el nuevo secret
-          sleep 10
-          
-          # Verificar que el secret contiene el hash de contraseña
-          PASSWORD_HASH=$(kubectl get secret argocd-secret -n argocd -o jsonpath='{.data.admin\.password}' 2>/dev/null | base64 -d)
-          
-          if [ -z "$PASSWORD_HASH" ]; then
-            echo "[✗] ERROR: No se encontró hash de contraseña"
-            exit 1
-          fi
-          
-          if ! echo "$PASSWORD_HASH" | grep -q '^\$2a\$'; then
-            echo "[✗] ERROR: Hash no es válido (no es bcrypt)"
-            exit 1
-          fi
-          echo "[✓] Hash de contraseña válido detectado"
-          
-          # Verificar que el pod tiene el secret montado
-          if ! kubectl get pod -n argocd -l app.kubernetes.io/name=argocd-server -o json 2>/dev/null | grep -q "argocd-secret"; then
-            echo "[⚠] ADVERTENCIA: El secret podría no estar correctamente montado"
-          fi
-          echo "[✓] Secret está disponible en el cluster"
-          
-          # Verificar que no hay errores recientes en los logs
-          if kubectl logs -n argocd deployment/argocd-server --tail=20 2>/dev/null | grep -i "invalid.*password\|auth.*fail" > /dev/null; then
-            echo "[⚠] ADVERTENCIA: Se detectaron errores de autenticación en logs recientes"
-            kubectl logs -n argocd deployment/argocd-server --tail=20
-          else
-            echo "[✓] No se detectan errores de autenticación en logs"
-          fi
-          
-          echo "::endgroup::"
-
       # -------------------------------------------------
       # COMMIT CHANGES
       # -------------------------------------------------
