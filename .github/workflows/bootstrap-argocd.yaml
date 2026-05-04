@@ -231,30 +231,23 @@ jobs:
         run: |
           echo "::group::Limpiando secret existente"
           
-          # Verificar si el secret existe
+          # Primero eliminar el SealedSecret si existe
+          if kubectl get sealedsecret argocd-secret -n argocd > /dev/null 2>&1; then
+            echo "[i] SealedSecret detectado, eliminando..."
+            kubectl delete sealedsecret argocd-secret -n argocd
+            sleep 2
+          fi
+          
+          # Luego eliminar el secret si existe
           if kubectl get secret argocd-secret -n argocd > /dev/null 2>&1; then
             echo "[i] Secret existente detectado, eliminando..."
-            
-            # Eliminar el secret
-            if kubectl delete secret argocd-secret -n argocd; then
-              echo "[✓] Secret eliminado correctamente"
-            else
-              echo "[✗] ERROR: No se pudo eliminar el secret"
-              exit 1
-            fi
-            
-            # Esperar a que se elimine completamente
+            kubectl delete secret argocd-secret -n argocd
             sleep 2
-            
-            # Verificar que se eliminó
-            if kubectl get secret argocd-secret -n argocd > /dev/null 2>&1; then
-              echo "[✗] ERROR: El secret aún existe después de eliminarlo"
-              exit 1
-            fi
-            echo "[✓] Eliminación confirmada"
+            echo "[✓] Secret eliminado correctamente"
           else
-            echo "[i] No hay secret existente, continuando"
+            echo "[i] No hay secret existente"
           fi
+          
           echo "::endgroup::"
 
       # -------------------------------------------------
