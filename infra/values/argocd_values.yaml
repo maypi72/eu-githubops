@@ -36,7 +36,6 @@ controller:
 server:
   replicas: 1
 
-  # 🔥 Sobrescritura obligatoria basada en el deployment real
   extraEnv:
     - name: ARGOCD_SERVER_REPO_SERVER
       value: argocd-repo-server:8081
@@ -55,6 +54,7 @@ server:
 
   service:
     type: ClusterIP
+    https: false   # 🔥 CLAVE: elimina el puerto 443 del Service
 
   ingress:
     enabled: true
@@ -62,9 +62,9 @@ server:
     annotations:
       cert-manager.io/cluster-issuer: mygitops-ca
       nginx.ingress.kubernetes.io/backend-protocol: "HTTP"
-      #nginx.ingress.kubernetes.io/ssl-redirect: "true"
       nginx.ingress.kubernetes.io/proxy-body-size: "0"
       nginx.ingress.kubernetes.io/proxy-read-timeout: "600"
+      # ssl-redirect eliminado porque rompe cookies y SSE
     hosts:
       - argocd.local
     paths:
