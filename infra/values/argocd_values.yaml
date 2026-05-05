@@ -8,7 +8,7 @@ configs:
     admin.enabled: true
 
   params:
-    server.insecure: "false"
+    server.insecure: "true"
     reposerver.disable.tls: "true"
     application.instanceLabelKey: argocd.argoproj.io/instance
     applicationSetController.enable.progressive.syncs: "true"
@@ -54,20 +54,21 @@ server:
 
   service:
     type: ClusterIP
-    https: true   # 🔥 CLAVE: habilita el puerto 443 del Service
-    servicePorthttps: 443
-    servicePorthttp: 80
+    https: false   
+    tls:
+      enabled: false # 
+      secretName: ""
 
   ingress:
     enabled: true
     ingressClassName: nginx
     annotations:
-      cert-manager.io/cluster-issuer: "mygitops-ca"
+      cert-manager.io/cluster-issuer: mygitops-ca
       nginx.ingress.kubernetes.io/backend-protocol: "HTTP"
+      nginx.ingress.kubernetes.io/force-ssl-redirect: "true"
+      nginx.ingress.kubernetes.io/use-forwarded-headers: "true"
       nginx.ingress.kubernetes.io/proxy-body-size: "0"
       nginx.ingress.kubernetes.io/proxy-read-timeout: "600"
-      nginx.ingress.kubernetes.io/ssl-passthrough: "false"
-      nginx.ingress.kubernetes.io/force-ssl-redirect: "true"
     hosts:
       - argocd.local
     paths:
