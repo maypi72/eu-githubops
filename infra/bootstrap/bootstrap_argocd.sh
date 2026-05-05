@@ -209,22 +209,111 @@ else
   echo -e "${GREEN}✓ ArgoCD está operacional${NC}"
 fi
 
+echo "::endgroup::"
+
+echo "::group::Configurando secreto de admin de ArgoCD"
+
+# Verificar si ARGOCD_ADMIN_PASSWORD está configurada
+if [ -z "${ARGOCD_ADMIN_PASSWORD:-}" ]; then
+  echo -e "${YELLOW}! Variable ARGOCD_ADMIN_PASSWORD no encontrada${NC}"
+  echo ""
+  echo "El secreto NO será actualizado. Opciones:"
+  echo "1. Exportar la variable: export ARGOCD_ADMIN_PASSWORD='tu-password'"
+  echo "2. O pasar como variable de entorno: ARGOCD_ADMIN_PASSWORD='tu-password' $0"
+  echo ""
+  echo "Si deseas actualizar el secreto manualmente después, ejecuta:"
+  echo "  cd $(dirname "$SCRIPT_DIR")/../.."
+  echo "  ARGOCD_ADMIN_PASSWORD='tu-password' bash scripts/gen_argocd_secret.sh"
+  echo ""
+  CONFIGURE_SECRET=false
+else
+  echo -e "${GREEN}✓ ARGOCD_ADMIN_PASSWORD configurada${NC}"
+  CONFIGURE_SECRET=true
+fi
+
+if [ "$CONFIGURE_SECRET" = true ]; then
+  # Encontrar script de generación de secretos
+  SCRIPTS_DIR="$(cd "$SCRIPT_DIR/../.." && pwd)/scripts"
+  GEN_SECRET_SCRIPT="${SCRIPTS_DIR}/gen_argocd_secret.sh"
+  
+  if [ ! -f "$GEN_SECRET_SCRIPT" ]; then
+    echo -e "${RED}✗ Script gen_argocd_secret.sh no encontrado en $GEN_SECRET_SCRIPT${NC}"
+    echo "  Saltando generación de secreto"
+  else
+    echo "Ejecutando generación de secreto..."
+    
+    # Exportar ARGOCD_ADMIN_PASSWORD para el script
+    export ARGOCD_ADMIN_PASSWORD
+    
+    # Ejecutar el script generador
+    if bash "$GEN_SECRET_SCRIPT"; then
+      echo -e "${GREEN}✓ Secreto generado exitosamente${NC}"
+      
+      # Aplicar el secreto sellado al cluster
+      echo ""
+      echo "Aplicando secreto sellado al cluster..."
+      SEALED_SECRET_FILE="${SCRIPTS_DIR}/../infra/argocd/sealed-secrets/argocd-secret.yaml"
+      
+      if [ -f "$SEALED_SECRET_FILE" ]; then
+        if kubectl apply -f "$SEALED_SECRET_FILE" -n "$ARGOCD_NAMESPACE"; then
+          echo -e "${GREEN}✓ Secreto sellado aplicado${NC}"
+          
+          # Esperar a que sealed-secrets descifre el secreto
+          echo "Esperando descifrado del secreto..."
+          sleep 3
+          
+          # Reiniciar los pods de argocd-server para que lean el nuevo secreto
+          echo "Reiniciando pod de ArgoCD server..."
+          kubectl rollout restart deployment/$RELEASE_NAME-server -n "$ARGOCD_NAMESPACE" --timeout=2m
+          
+          if [ $? -eq 0 ]; then
+            echo -e "${GREEN}✓ Pod reiniciado. Esperando readiness...${NC}"
+            kubectl rollout status deployment/$RELEASE_NAME-server -n "$ARGOCD_NAMESPACE" --timeout=2m
+            
+            if [ $? -eq 0 ]; then
+              echo -e "${GREEN}✓ ArgoCD server actualizado con nueva contraseña de admin${NC}"
+            else
+              echo -e "${YELLOW}! Timeout esperando readiness del pod, pero el secreto fue aplicado${NC}"
+            fi
+          else
+            echo -e "${YELLOW}! No se pudo reiniciar el pod, pero el secreto fue aplicado${NC}"
+          fi
+        else
+          echo -e "${RED}✗ Error al aplicar el secreto sellado${NC}"
+        fi
+      else
+        echo -e "${RED}✗ Archivo de secreto sellado no encontrado: $SEALED_SECRET_FILE${NC}"
+      fi
+    else
+      echo -e "${RED}✗ Error al generar el secreto${NC}"
+    fi
+  fi
+fi
+
+echo "::endgroup::"
+
 # Mostrar información de acceso
+echo "::group::Información de acceso a ArgoCD"
 echo ""
 echo "ArgoCD ha sido instalado en el namespace: $ARGOCD_NAMESPACE"
 echo ""
-echo "Para acceder a ArgoCD:"
+echo "Para acceder a ArgoCD (localmente):"
 echo "  kubectl port-forward svc/$RELEASE_NAME-server -n $ARGOCD_NAMESPACE 8080:443"
 echo ""
 echo "Luego accede a: https://localhost:8080"
 echo ""
-echo "Para obtener la contraseña inicial:"
-echo "  kubectl -n $ARGOCD_NAMESPACE get secret argocd-initial-admin-secret -o jsonpath=\"{.data.password}\" | base64 -d"
+if [ "$CONFIGURE_SECRET" = true ]; then
+  echo "Usuario: admin"
+  echo "Contraseña: La que configuraste en ARGOCD_ADMIN_PASSWORD"
+else
+  echo "Para obtener la contraseña inicial:"
+  echo "  kubectl -n $ARGOCD_NAMESPACE get secret argocd-initial-admin-secret -o jsonpath=\"{.data.password}\" | base64 -d"
+fi
 echo ""
 
 echo "::endgroup::"
 
 echo "════════════════════════════════════════════════"
-echo -e "${GREEN}[✓] ArgoCD instalado correctamente${NC}"
+echo -e "${GREEN}[✓] ArgoCD instalado y configurado${NC}"
 echo "════════════════════════════════════════════════"
 
