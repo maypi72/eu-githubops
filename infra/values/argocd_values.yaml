@@ -55,6 +55,8 @@ server:
   service:
     type: ClusterIP
     https: false   # 🔥 CLAVE: elimina el puerto 443 del Service
+    servicePorthttps: 0
+    servicePorthttp: 80
 
   ingress:
     enabled: true
@@ -63,6 +65,8 @@ server:
       nginx.ingress.kubernetes.io/backend-protocol: "HTTP"
       nginx.ingress.kubernetes.io/proxy-body-size: "0"
       nginx.ingress.kubernetes.io/proxy-read-timeout: "600"
+      nginx.ingress.kubernetes.io/ssl-passthrough: "false"
+      nginx.ingress.kubernetes.io/force-ssl-redirect: "false"
     hosts:
       - argocd.local
     paths:
