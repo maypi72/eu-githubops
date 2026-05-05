@@ -221,10 +221,6 @@ if [ -z "${ARGOCD_ADMIN_PASSWORD:-}" ]; then
   echo "1. Exportar la variable: export ARGOCD_ADMIN_PASSWORD='tu-password'"
   echo "2. O pasar como variable de entorno: ARGOCD_ADMIN_PASSWORD='tu-password' $0"
   echo ""
-  echo "Si deseas actualizar el secreto manualmente después, ejecuta:"
-  echo "  cd $(dirname "$SCRIPT_DIR")/../.."
-  echo "  ARGOCD_ADMIN_PASSWORD='tu-password' bash scripts/gen_argocd_secret.sh"
-  echo ""
   CONFIGURE_SECRET=false
 else
   echo -e "${GREEN}✓ ARGOCD_ADMIN_PASSWORD configurada${NC}"
@@ -232,61 +228,114 @@ else
 fi
 
 if [ "$CONFIGURE_SECRET" = true ]; then
-  # Encontrar script de generación de secretos
+  # PASO 1: Eliminar el secret inicial por defecto
+  echo ""
+  echo "╔════════════════════════════════════════════════════════════╗"
+  echo "║ PASO 1: Eliminar secreto inicial por defecto               ║"
+  echo "╚════════════════════════════════════════════════════════════╝"
+  echo "Eliminando argocd-initial-admin-secret..."
+  if kubectl delete secret argocd-initial-admin-secret -n "$ARGOCD_NAMESPACE" 2>/dev/null; then
+    echo -e "${GREEN}✓ Secret inicial eliminado${NC}"
+  else
+    echo -e "${YELLOW}! Secret inicial no encontrado (podría no existir)${NC}"
+  fi
+  
+  # PASO 2: Generar secreto sellado con contraseña de GitHub Actions
+  echo ""
+  echo "╔════════════════════════════════════════════════════════════╗"
+  echo "║ PASO 2: Generar secreto sellado con GitHub Actions Secret  ║"
+  echo "╚════════════════════════════════════════════════════════════╝"
+  
   SCRIPTS_DIR="$(cd "$SCRIPT_DIR/../.." && pwd)/scripts"
   GEN_SECRET_SCRIPT="${SCRIPTS_DIR}/gen_argocd_secret.sh"
   
   if [ ! -f "$GEN_SECRET_SCRIPT" ]; then
     echo -e "${RED}✗ Script gen_argocd_secret.sh no encontrado en $GEN_SECRET_SCRIPT${NC}"
-    echo "  Saltando generación de secreto"
-  else
-    echo "Ejecutando generación de secreto..."
-    
-    # Exportar ARGOCD_ADMIN_PASSWORD para el script
-    export ARGOCD_ADMIN_PASSWORD
-    
-    # Ejecutar el script generador
-    if bash "$GEN_SECRET_SCRIPT"; then
-      echo -e "${GREEN}✓ Secreto generado exitosamente${NC}"
-      
-      # Aplicar el secreto sellado al cluster
-      echo ""
-      echo "Aplicando secreto sellado al cluster..."
-      SEALED_SECRET_FILE="${SCRIPTS_DIR}/../infra/argocd/sealed-secrets/argocd-secret.yaml"
-      
-      if [ -f "$SEALED_SECRET_FILE" ]; then
-        if kubectl apply -f "$SEALED_SECRET_FILE" -n "$ARGOCD_NAMESPACE"; then
-          echo -e "${GREEN}✓ Secreto sellado aplicado${NC}"
-          
-          # Esperar a que sealed-secrets descifre el secreto
-          echo "Esperando descifrado del secreto..."
-          sleep 3
-          
-          # Reiniciar los pods de argocd-server para que lean el nuevo secreto
-          echo "Reiniciando pod de ArgoCD server..."
-          kubectl rollout restart deployment/$RELEASE_NAME-server -n "$ARGOCD_NAMESPACE" --timeout=2m
-          
-          if [ $? -eq 0 ]; then
-            echo -e "${GREEN}✓ Pod reiniciado. Esperando readiness...${NC}"
-            kubectl rollout status deployment/$RELEASE_NAME-server -n "$ARGOCD_NAMESPACE" --timeout=2m
-            
-            if [ $? -eq 0 ]; then
-              echo -e "${GREEN}✓ ArgoCD server actualizado con nueva contraseña de admin${NC}"
-            else
-              echo -e "${YELLOW}! Timeout esperando readiness del pod, pero el secreto fue aplicado${NC}"
-            fi
-          else
-            echo -e "${YELLOW}! No se pudo reiniciar el pod, pero el secreto fue aplicado${NC}"
-          fi
-        else
-          echo -e "${RED}✗ Error al aplicar el secreto sellado${NC}"
-        fi
-      else
-        echo -e "${RED}✗ Archivo de secreto sellado no encontrado: $SEALED_SECRET_FILE${NC}"
-      fi
-    else
-      echo -e "${RED}✗ Error al generar el secreto${NC}"
+    exit 1
+  fi
+  
+  # Exportar ARGOCD_ADMIN_PASSWORD para el script
+  export ARGOCD_ADMIN_PASSWORD
+  
+  # Ejecutar el script generador
+  if ! bash "$GEN_SECRET_SCRIPT"; then
+    echo -e "${RED}✗ Error al generar el secreto${NC}"
+    exit 1
+  fi
+  echo -e "${GREEN}✓ Secreto generado exitosamente${NC}"
+  
+  # PASO 3: Aplicar el secreto sellado al cluster
+  echo ""
+  echo "╔════════════════════════════════════════════════════════════╗"
+  echo "║ PASO 3: Aplicar secreto sellado al cluster                 ║"
+  echo "╚════════════════════════════════════════════════════════════╝"
+  SEALED_SECRET_FILE="${SCRIPTS_DIR}/../infra/argocd/sealed-secrets/argocd-secret.yaml"
+  
+  if [ ! -f "$SEALED_SECRET_FILE" ]; then
+    echo -e "${RED}✗ Archivo de secreto sellado no encontrado: $SEALED_SECRET_FILE${NC}"
+    exit 1
+  fi
+  
+  if ! kubectl apply -f "$SEALED_SECRET_FILE" -n "$ARGOCD_NAMESPACE"; then
+    echo -e "${RED}✗ Error al aplicar el secreto sellado${NC}"
+    exit 1
+  fi
+  echo -e "${GREEN}✓ Secreto sellado aplicado${NC}"
+  
+  # Esperar a que sealed-secrets descifre el secreto
+  echo "Esperando descifrado del secreto por sealed-secrets..."
+  sleep 3
+  
+  # PASO 4: Hacer upgrade de Helm para que ArgoCD recargue con el nuevo secreto
+  echo ""
+  echo "╔════════════════════════════════════════════════════════════╗"
+  echo "║ PASO 4: Upgrade de Helm para aplicar nueva configuración   ║"
+  echo "╚════════════════════════════════════════════════════════════╝"
+  
+  HELM_UPGRADE=(
+    helm
+    "upgrade"
+    "$RELEASE_NAME"
+    "argo/argo-cd"
+    "--namespace"
+    "$ARGOCD_NAMESPACE"
+    "--version"
+    "$ARGOCD_CHART_VERSION"
+    "--values"
+    "$ARGOCD_VALUES"
+    "--wait"
+    "--timeout"
+    "5m"
+  )
+  
+  if ! retry "${HELM_UPGRADE[@]}"; then
+    echo -e "${RED}✗ Error en el upgrade de Helm${NC}"
+    exit 1
+  fi
+  echo -e "${GREEN}✓ Helm upgrade completado${NC}"
+  
+  # Esperar a que los pods se estabilicen
+  echo ""
+  echo "Esperando a que los pods se estabilicen con la nueva configuración..."
+  MAX_RETRIES=30
+  RETRY_DELAY=3
+  PODS_READY=false
+  
+  for i in $(seq 1 $MAX_RETRIES); do
+    if kubectl get pods -n "$ARGOCD_NAMESPACE" -l app.kubernetes.io/name=argocd-server -o jsonpath='{.items[*].status.conditions[?(@.type=="Ready")].status}' 2>/dev/null | grep -q "True"; then
+      echo -e "${GREEN}✓ ArgoCD server está ready con nueva contraseña${NC}"
+      PODS_READY=true
+      break
     fi
+    
+    if [ $i -lt $MAX_RETRIES ]; then
+      echo "  Intento $i/$MAX_RETRIES..."
+      sleep $RETRY_DELAY
+    fi
+  done
+  
+  if [ "$PODS_READY" = false ]; then
+    echo -e "${YELLOW}! Timeout esperando readiness, pero los cambios fueron aplicados${NC}"
   fi
 fi
 
@@ -295,25 +344,26 @@ echo "::endgroup::"
 # Mostrar información de acceso
 echo "::group::Información de acceso a ArgoCD"
 echo ""
+echo "════════════════════════════════════════════════"
 echo "ArgoCD ha sido instalado en el namespace: $ARGOCD_NAMESPACE"
+echo "════════════════════════════════════════════════"
 echo ""
 echo "Para acceder a ArgoCD (localmente):"
 echo "  kubectl port-forward svc/$RELEASE_NAME-server -n $ARGOCD_NAMESPACE 8080:443"
 echo ""
 echo "Luego accede a: https://localhost:8080"
 echo ""
+echo "Usuario: admin"
 if [ "$CONFIGURE_SECRET" = true ]; then
-  echo "Usuario: admin"
-  echo "Contraseña: La que configuraste en ARGOCD_ADMIN_PASSWORD"
+  echo "Contraseña: La que configuraste en ARGOCD_ADMIN_PASSWORD (GitHub Actions Secret)"
 else
-  echo "Para obtener la contraseña inicial:"
-  echo "  kubectl -n $ARGOCD_NAMESPACE get secret argocd-initial-admin-secret -o jsonpath=\"{.data.password}\" | base64 -d"
+  echo "Contraseña: La contraseña inicial por defecto de ArgoCD"
 fi
 echo ""
 
 echo "::endgroup::"
 
 echo "════════════════════════════════════════════════"
-echo -e "${GREEN}[✓] ArgoCD instalado y configurado${NC}"
+echo -e "${GREEN}[✓] ArgoCD instalado y configurado correctamente${NC}"
 echo "════════════════════════════════════════════════"
 
